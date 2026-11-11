@@ -1,0 +1,51 @@
+# ---- Build output ----
+build/
+out/
+dist/
+bin/
+target/
+*.class
+*.jar
+!lib/*.jar
+
+# ---- Generated sources ----
+generated/
+src-gen/
+
+# ---- IDE / editors ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+nbproject/
+*.swp
+*.swo
+*~
+
+# ---- OS junk ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ---- Logs / temp ----
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+hs_err_pid*.log
+replay_pid*.log
+
+# ---- Test artifacts ----
+*.j2pc-trace
+.j2pc-cache/

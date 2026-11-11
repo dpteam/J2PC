@@ -1,0 +1,18 @@
+package javax.microedition.media;
+
+/** Player state notifications. */
+public interface PlayerListener {
+
+    String STARTED = "started";
+    String STOPPED = "stopped";
+    String END_OF_MEDIA = "endOfMedia";
+    String DURATION_UPDATED = "durationUpdated";
+    String DEVICE_UNAVAILABLE = "deviceUnavailable";
+    String DEVICE_AVAILABLE = "deviceAvailable";
+    String VOLUME_CHANGED = "volumeChanged";
+    String SIZE_CHANGED = "sizeChanged";
+    String ERROR = "error";
+    String CLOSED = "closed";
+
+    void playerUpdate(Player player, String event, Object eventData);
+}

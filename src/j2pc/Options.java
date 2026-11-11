@@ -1,0 +1,25 @@
+package j2pc;
+
+import java.nio.file.Path;
+
+/** Command line options shared by the whole tool. */
+public final class Options {
+
+    public Path outputDir = Path.of("out");
+    public Path jadFile;
+    public boolean verbose;
+    public boolean quiet;
+    public boolean emitComments = true;
+    public boolean lineComments = true;
+    public boolean includeSynthetic = true;
+    public boolean stats;
+    public int sourceLevel = 17;
+    public String version = "1.0.0";
+    public String indentUnit = "    ";
+
+    /** Optional package prefix applied to regenerated classes. */
+    public String packagePrefix = "";
+
+    /** When set, only classes whose internal name starts with this prefix are emitted. */
+    public String onlyPrefix;
+}

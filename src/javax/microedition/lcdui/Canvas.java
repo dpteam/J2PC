@@ -1,0 +1,169 @@
+package javax.microedition.lcdui;
+
+/**
+ * MIDP {@code Canvas}: an application drawn surface with key handling.
+ *
+ * <p>Rendering is driven by {@link Display}, which calls
+ * {@link #paint(Graphics)} whenever the surface is dirty.</p>
+ */
+public abstract class Canvas extends Displayable {
+
+    public static final int UP = 1;
+    public static final int DOWN = 6;
+    public static final int LEFT = 2;
+    public static final int RIGHT = 5;
+    public static final int FIRE = 8;
+    public static final int GAME_A = 9;
+    public static final int GAME_B = 10;
+    public static final int GAME_C = 11;
+    public static final int GAME_D = 12;
+
+    public static final int KEY_NUM0 = 48;
+    public static final int KEY_NUM1 = 49;
+    public static final int KEY_NUM2 = 50;
+    public static final int KEY_NUM3 = 51;
+    public static final int KEY_NUM4 = 52;
+    public static final int KEY_NUM5 = 53;
+    public static final int KEY_NUM6 = 54;
+    public static final int KEY_NUM7 = 55;
+    public static final int KEY_NUM8 = 56;
+    public static final int KEY_NUM9 = 57;
+    public static final int KEY_STAR = 42;
+    public static final int KEY_POUND = 35;
+
+    private boolean fullScreen;
+
+    protected Canvas() {
+    }
+
+    protected abstract void paint(Graphics g);
+
+    protected void keyPressed(int keyCode) {
+    }
+
+    protected void keyReleased(int keyCode) {
+    }
+
+    protected void keyRepeated(int keyCode) {
+    }
+
+    protected void pointerPressed(int x, int y) {
+    }
+
+    protected void pointerReleased(int x, int y) {
+    }
+
+    protected void pointerDragged(int x, int y) {
+    }
+
+    protected void sizeChanged(int w, int h) {
+    }
+
+    public final void repaint() {
+        Display.requestRepaint(this);
+    }
+
+    public final void repaint(int x, int y, int width, int height) {
+        Display.requestRepaint(this);
+    }
+
+    public final void serviceRepaints() {
+        Display.serviceRepaints(this);
+    }
+
+    public final void setFullScreenMode(boolean mode) {
+        this.fullScreen = mode;
+    }
+
+    public final boolean isFullScreenMode() {
+        return fullScreen;
+    }
+
+    public boolean hasPointerEvents() {
+        return true;
+    }
+
+    public boolean hasPointerMotionEvents() {
+        return true;
+    }
+
+    public boolean hasRepeatEvents() {
+        return true;
+    }
+
+    public int getKeyCode(int gameAction) {
+        switch (gameAction) {
+            case UP: return java.awt.event.KeyEvent.VK_UP;
+            case DOWN: return java.awt.event.KeyEvent.VK_DOWN;
+            case LEFT: return java.awt.event.KeyEvent.VK_LEFT;
+            case RIGHT: return java.awt.event.KeyEvent.VK_RIGHT;
+            case FIRE: return java.awt.event.KeyEvent.VK_ENTER;
+            default: return 0;
+        }
+    }
+
+    public int getGameAction(int keyCode) {
+        switch (keyCode) {
+            case java.awt.event.KeyEvent.VK_UP: return UP;
+            case java.awt.event.KeyEvent.VK_DOWN: return DOWN;
+            case java.awt.event.KeyEvent.VK_LEFT: return LEFT;
+            case java.awt.event.KeyEvent.VK_RIGHT: return RIGHT;
+            case java.awt.event.KeyEvent.VK_ENTER:
+            case java.awt.event.KeyEvent.VK_SPACE: return FIRE;
+            case java.awt.event.KeyEvent.VK_F1:
+            case java.awt.event.KeyEvent.VK_Q: return GAME_A;
+            case java.awt.event.KeyEvent.VK_F2:
+            case java.awt.event.KeyEvent.VK_E: return GAME_B;
+            case java.awt.event.KeyEvent.VK_F3:
+            case java.awt.event.KeyEvent.VK_R: return GAME_C;
+            case java.awt.event.KeyEvent.VK_F4:
+            case java.awt.event.KeyEvent.VK_T: return GAME_D;
+            default: return 0;
+        }
+    }
+
+    public String getKeyName(int keyCode) {
+        switch (keyCode) {
+            case java.awt.event.KeyEvent.VK_UP: return "UP";
+            case java.awt.event.KeyEvent.VK_DOWN: return "DOWN";
+            case java.awt.event.KeyEvent.VK_LEFT: return "LEFT";
+            case java.awt.event.KeyEvent.VK_RIGHT: return "RIGHT";
+            case java.awt.event.KeyEvent.VK_ENTER: return "ENTER";
+            default: return java.awt.event.KeyEvent.getKeyText(keyCode);
+        }
+    }
+
+    public boolean isDoubleBuffered() {
+        return true;
+    }
+
+    @Override
+    protected void paintInternal(Graphics g) {
+        paint(g);
+    }
+
+    @Override
+    boolean keyEvent(int keyCode, boolean pressed) {
+        if (pressed) {
+            keyPressed(keyCode);
+        } else {
+            keyReleased(keyCode);
+        }
+        return true;
+    }
+
+    /** Internal hook used by the desktop host for pointer input. */
+    void pointerEvent(int x, int y, int kind) {
+        if (kind == 0) {
+            pointerPressed(x, y);
+        } else if (kind == 1) {
+            pointerReleased(x, y);
+        } else {
+            pointerDragged(x, y);
+        }
+    }
+
+    void sizeChangedFromHost(int w, int h) {
+        sizeChanged(w, h);
+    }
+}
