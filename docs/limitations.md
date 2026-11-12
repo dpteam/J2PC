@@ -102,6 +102,16 @@ The recompiler has been exercised on suites up to a few hundred classes. Very la
 (thousands of classes) should work but have not been profiled; memory use is dominated by
 holding all `ClassFile` objects at once.
 
+## Packaging and interfaces
+
+| Limit | Detail |
+|-------|--------|
+| `--build` needs a JDK | it calls the compiler through `ToolProvider`; on a JRE that returns `null` and the tool says so |
+| `--exe` needs `jpackage` | part of the JDK from 14 onwards, not the JRE; without it the JAR is still produced |
+| `--exe` output is a launcher, not a native binary | a trimmed JVM is inside the app image |
+| `--gui` needs a browser | a plain JDK cannot render a modern page inside a Java window, so the page opens in the system browser next to a control window |
+| `--tui` is line-oriented | no arrow-key menus; it works in any terminal, which is the point |
+
 ## What is *not* a limitation
 
 Some things that look like limitations are deliberate:

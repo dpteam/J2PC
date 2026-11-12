@@ -200,10 +200,12 @@ log. Colour is dropped automatically when the output is redirected or
 **GUI** — `--gui`. A local HTTP server on the loopback interface plus a browser
 front end: application list, options, live log, a viewer for the generated
 sources, and a *Play* button that starts the packaged application in its own
-process. The server binds to `127.0.0.1` only and never leaves the machine. On a
-plain JDK the page opens in the system browser next to a small control window;
-with JavaFX on the module path it would embed directly, which is why the front
-end is plain HTML/JS with no build step.
+process. The server binds to `127.0.0.1` only and never leaves the machine. A
+plain JDK cannot render a modern page inside a Java window — `JEditorPane` has no
+JavaScript and JavaFX is no longer part of the JDK — so the page opens in the
+system browser next to a small control window that keeps the server alive. The
+front end is plain HTML/JS with no build step, so a WebView could host it later
+without touching the server.
 
 Both interactive front ends give every application its own output folder
 (`out/Tetris/`, `out/2048/`): suites routinely ship a class with the same name,
