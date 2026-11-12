@@ -19,6 +19,9 @@ public interface VideoControl extends Control {
 
     void setDisplayFullScreen(boolean fullScreenMode);
 
+    /** MIDP 2.0: requests a display size in pixels. */
+    void setDisplaySize(int width, int height);
+
     int getDisplayWidth();
 
     int getDisplayHeight();

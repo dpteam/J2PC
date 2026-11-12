@@ -47,6 +47,11 @@ public final class FileConnectionImpl implements FileConnection {
     }
 
     @Override
+    public boolean isDirectory() {
+        return Files.isDirectory(path);
+    }
+
+    @Override
     public InputStream openInputStream() throws IOException {
         checkOpen();
         return Files.newInputStream(path);

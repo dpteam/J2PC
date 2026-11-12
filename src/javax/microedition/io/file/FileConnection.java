@@ -20,6 +20,9 @@ public interface FileConnection extends javax.microedition.io.StreamConnection {
     /** True when the file or directory exists; part of the MIDP 2.0 API. */
     boolean exists();
 
+    /** True when this connection refers to a directory. */
+    boolean isDirectory();
+
     InputStream openInputStream() throws IOException;
 
     DataInputStream openDataInputStream() throws IOException;

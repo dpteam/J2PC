@@ -159,6 +159,11 @@ public final class RecordStore {
         listeners.add(listener);
     }
 
+    /** MIDP 2.0: changes the access mode of an open store. */
+    public void setMode(int authmode, boolean writable) throws RecordStoreException {
+        // The desktop store is always read-write and private to the user.
+    }
+
     public void removeRecordListener(RecordListener listener) {
         listeners.remove(listener);
     }

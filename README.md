@@ -66,9 +66,9 @@ Measured on a private collection of **151 real J2ME applications**:
 | Metric | Value |
 |--------|-------|
 | Recompiled without errors | **151 / 151** |
-| Generated Java compiles | **106 / 151** |
-| Classes emitted for those | 2 227 |
-| Methods emitted for those | 68 355 |
+| Generated Java compiles | **121 / 151** |
+| Classes emitted for those | 2 892 |
+| Methods emitted for those | 79 050 |
 
 Two features make that possible beyond the translation itself:
 

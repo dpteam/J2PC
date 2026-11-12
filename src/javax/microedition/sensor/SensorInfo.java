@@ -29,6 +29,9 @@ public interface SensorInfo {
 
     int getProperty(int index);
 
+    /** Names of the properties this sensor exposes. */
+    String[] getPropertyNames();
+
     boolean isAvailabilityPushSupported();
 
     boolean isAvailable();

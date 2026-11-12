@@ -18,7 +18,7 @@ public class TextField extends Item {
     public static final int INITIAL_CAPS_SENTENCE = 0x200000;
 
     private String text;
-    private final int maxSize;
+    private int maxSize;
     private final int constraints;
 
     public TextField(String label, String text, int maxSize, int constraints) {
@@ -42,6 +42,11 @@ public class TextField extends Item {
 
     public int getMaxSize() {
         return maxSize;
+    }
+
+    /** MIDP 2.0: changes the maximum length of the field. */
+    public void setMaxSize(int maxSize) {
+        this.maxSize = maxSize;
     }
 
     public int getConstraints() {

@@ -105,7 +105,7 @@ public final class NameRegistry {
         }
     }
 
-    /** Registers {@code cf} after its superclass, so inherited fields are known. */
+    /** Registers {@code cf} after its superclass and interfaces. */
     private void registerWithAncestors(ClassFile cf, Map<String, ClassFile> byName, Set<String> path) {
         if (classes.containsKey(cf.name()) || !path.add(cf.name())) {
             return;
@@ -114,6 +114,15 @@ public final class NameRegistry {
         ClassFile parentFile = parent == null ? null : byName.get(parent);
         if (parentFile != null) {
             registerWithAncestors(parentFile, byName, path);
+        }
+        // Interfaces must be registered first for the same reason as superclasses:
+        // an implementing class has to see the name the interface chose for the
+        // method it implements.
+        for (String itf : cf.interfaceNames()) {
+            ClassFile itfFile = byName.get(itf);
+            if (itfFile != null) {
+                registerWithAncestors(itfFile, byName, path);
+            }
         }
         register(cf);
     }

@@ -76,6 +76,33 @@ public final class Display {
         setCurrent(alert);
     }
 
+    // ------------------------------------------- vendor display extensions
+
+    /**
+     * Suggested width for an image of the given width.
+     *
+     * <p>Not part of MIDP, but Nokia's S60 {@code Display} exposes these and games
+     * call them to size their buffers. The emulation returns the screen size,
+     * which is what the handset reported.</p>
+     */
+    public int getBestImageWidth(int imageType) {
+        return 240;
+    }
+
+    public int getBestImageHeight(int imageType) {
+        return 320;
+    }
+
+    /** Border style of the display, as the vendor API reports it. */
+    public int getBorderStyle(boolean highlighted) {
+        return 0;
+    }
+
+    /** Resolves a colour index to a displayable colour. */
+    public int getColor(int colorIndex) {
+        return colorIndex & 0xFFFFFF;
+    }
+
     public Displayable getCurrent() {
         return current;
     }

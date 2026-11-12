@@ -123,8 +123,8 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 106 produce Java that
-compiles (2 227 classes, 68 355 methods). Of the 200 remaining javac errors, most are
+On a private collection of 151 applications, all 151 recompile and 121 produce Java that
+compiles (2 892 classes, 79 050 methods). Of the 83 remaining javac errors, most are
 suites that ship only part of their classes.
 
 | Missing / broken | Applications |

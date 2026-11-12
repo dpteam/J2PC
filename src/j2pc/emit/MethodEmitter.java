@@ -81,6 +81,8 @@ public final class MethodEmitter {
      * right after {@code super(...)} unless the call itself consumed it.</p>
      */
     private final Map<Integer, Val> prologueLocals = new HashMap<>();
+    /** Names declared inside the constructor prologue, so they can be undone. */
+    private final java.util.Set<String> prologueDeclared = new java.util.HashSet<>();
     private boolean declarationsInline;
     private boolean prologueMode;
 
@@ -203,6 +205,24 @@ public final class MethodEmitter {
             }
             prologueLocals.clear();
             prologue = reorderSuperFirst(prologueLines);
+            if (prologue == null) {
+                // The mandatory call takes an argument that is computed by the
+                // preceding statements, so it cannot be moved to the front: Java
+                // would require a variable to be declared before its use, and the
+                // declaration cannot precede super(...). The constructor falls back
+                // to the deferred form, where the delegation is stubbed out.
+                Log.warn("%s%s: super()/this() takes a computed argument; delegation dropped",
+                        cf.name(), method.desc());
+                prologue = "";
+                loopStart = 0;
+                deferredInitPc = initPc;
+                // Undo the declarations the discarded prologue made, so the same
+                // temporaries can be declared again inside the dispatch loop.
+                declared.removeAll(prologueDeclared);
+                prologueDeclared.clear();
+                prologueLocals.clear();
+                prologueMode = false;
+            }
         }
 
         if (flat) {
@@ -234,13 +254,16 @@ public final class MethodEmitter {
     }
 
     /**
-     * Java requires {@code super(...)} or {@code this(...)} to be the first
-     * statement of a constructor, but the JVM allows work before it — inner
-     * classes assign their synthetic {@code this$0} field first, for example.
+     * Moves the mandatory {@code super(...)}/{@code this(...)} call to the front.
      *
-     * <p>The call is therefore moved to the front. That is safe because nothing
-     * can observe the object before {@code super()} returns: every instance method
-     * needs the object to be constructed first.</p>
+     * <p>Java requires it to be the first statement, but the JVM allows work before
+     * it — inner classes assign their synthetic {@code this$0} field first, for
+     * example. Moving the call is safe when nothing it uses is produced by the
+     * preceding lines.</p>
+     *
+     * <p>Returns {@code null} when the call consumes a value that a preceding line
+     * declares: the declaration would then have to appear before the call, which
+     * Java forbids, so the constructor cannot be expressed this way.</p>
      */
     private static String reorderSuperFirst(java.util.List<String> lines) {
         int callIndex = -1;
@@ -252,7 +275,22 @@ public final class MethodEmitter {
             }
         }
         if (callIndex > 0) {
-            String call = lines.remove(callIndex);
+            String call = lines.get(callIndex);
+            java.util.Set<String> declaredBefore = new java.util.HashSet<>();
+            for (int i = 0; i < callIndex; i++) {
+                java.util.regex.Matcher m = DECLARATION.matcher(lines.get(i));
+                if (m.find()) {
+                    declaredBefore.add(m.group(1));
+                }
+            }
+            for (String name : declaredBefore) {
+                if (java.util.regex.Pattern.compile("(?<![\\w$.])"
+                        + java.util.regex.Pattern.quote(name) + "(?![\\w$])")
+                        .matcher(call).find()) {
+                    return null;
+                }
+            }
+            lines.remove(callIndex);
             lines.add(0, call);
         }
         StringBuilder sb = new StringBuilder();
@@ -261,6 +299,10 @@ public final class MethodEmitter {
         }
         return sb.toString();
     }
+
+    /** Matches a local declaration such as {@code int v1 = 0;}. */
+    private static final java.util.regex.Pattern DECLARATION =
+            java.util.regex.Pattern.compile("^\\s*[\\w.$\\[\\]]+\\s+([A-Za-z_$][\\w$]*)\\s*=");
 
     private String stub(String reason) {
         StringBuilder sb = new StringBuilder(signature());
@@ -525,6 +567,9 @@ public final class MethodEmitter {
     private void declareInline(String name, String type, String init) {
         if (!declared.add(name)) {
             return;
+        }
+        if (prologueMode) {
+            prologueDeclared.add(name);
         }
         out.line(type + " " + name + " = " + init + ";");
     }
