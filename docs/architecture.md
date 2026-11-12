@@ -204,6 +204,28 @@ the real API so that recompiled code needs no source changes:
 * `RecordStore` persists to `~/.j2pc/rms/<store>.rms`,
 * `Connector` implements `http`, `https` and `file`.
 
+## Front ends and packaging
+
+Everything above is the engine; three front ends drive it.
+
+```
+                     ┌── CLI      Main + Options
+ Recompiler.Result ──┼── TUI      j2pc.tui    (line oriented, ANSI)
+                     ├── GUI      j2pc.gui    (localhost HTTP + HTML)
+                     └── build    j2pc.build  (javac → JAR → jpackage)
+```
+
+The front ends share `Options` and call `Recompiler` directly, so a change to the
+pipeline reaches all three at once.
+
+`j2pc.build` is deliberately split into single-purpose classes:
+
+* `SourceCompiler` — `ToolProvider.getSystemJavaCompiler()`, no process spawning,
+* `RuntimeClasses` — finds and copies the runtime packages the generated code needs,
+* `JarPackager` — one self-contained archive, fixed entry timestamps for reproducibility,
+* `ExePackager` — `jpackage` into a staging directory, then a rename into place,
+* `AppBuilder` — the three steps in order, with the output layout.
+
 ## Design rules
 
 1. **Never guess.** If the analysis cannot prove something, emit a helper call rather than a

@@ -67,6 +67,20 @@ public final class Main {
                     break;
                 case "--list":
                     return listJar(Path.of(need(args, ++i, a)));
+                case "--build":
+                    opts.buildJar = true;
+                    break;
+                case "--exe":
+                case "--native":
+                    opts.buildJar = true;
+                    opts.buildNativeImage = true;
+                    break;
+                case "--tui":
+                    opts.tui = true;
+                    break;
+                case "--gui":
+                    opts.gui = true;
+                    break;
                 default:
                     if (a.startsWith("-")) {
                         System.err.println("unknown option: " + a);
@@ -75,6 +89,14 @@ public final class Main {
                     }
                     inputs.add(Path.of(a));
             }
+        }
+
+        if (opts.tui) {
+            return j2pc.tui.Tui.run(opts);
+        }
+        if (opts.gui) {
+            j2pc.gui.Gui.start(opts);
+            return 0;
         }
 
         if (inputs.isEmpty()) {
@@ -113,6 +135,21 @@ public final class Main {
                         + " failedMethods=" + result.failedMethods
                         + " failedClasses=" + result.failedClasses
                         + " launcher=" + result.launcher);
+            }
+            if (opts.buildJar) {
+                j2pc.build.AppBuilder.AppInfo info = new j2pc.build.AppBuilder.AppInfo(
+                        result.appName, result.appVendor, result.appVersion);
+                java.nio.file.Path assets = opts.outputDir.resolve("assets");
+                j2pc.build.AppBuilder.BuildResult build =
+                        new j2pc.build.AppBuilder(opts).build(opts.outputDir, assets, info);
+                if (!build.ok) {
+                    return 1;
+                }
+                if (opts.stats) {
+                    System.out.println("jar=" + build.jar
+                            + " image=" + build.image
+                            + " compiled=" + build.compiledClasses);
+                }
             }
             return result.failedClasses == 0 ? 0 : 1;
         } catch (IOException e) {
@@ -168,6 +205,10 @@ public final class Main {
         System.out.println("      --only <prefix> recompile only classes with this internal name prefix");
         System.out.println("      --indent <str>  indentation unit (default: four spaces, \\t for a tab)");
         System.out.println("      --list <jar>    list archive entries and exit");
+        System.out.println("      --build         compile the generated sources and package a runnable JAR");
+        System.out.println("      --exe, --native also wrap the JAR into a native launcher (jpackage)");
+        System.out.println("      --tui           start the terminal interface");
+        System.out.println("      --gui           start the desktop interface (local web UI)");
         System.out.println("  -h, --help          show this help");
         System.out.println("  -V, --version       show the version");
     }

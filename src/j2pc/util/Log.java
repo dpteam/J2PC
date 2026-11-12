@@ -15,8 +15,15 @@ public final class Log {
     private static int level = INFO;
     private static int warnings;
     private static int errors;
+    /** Optional second destination, used by the GUI to show the log live. */
+    private static java.util.function.Consumer<String> sink;
 
     private Log() {
+    }
+
+    /** Redirects a copy of every line to {@code consumer}; null stops it. */
+    public static void setSink(java.util.function.Consumer<String> consumer) {
+        sink = consumer;
     }
 
     public static void setLevel(int l) {
@@ -64,6 +71,15 @@ public final class Log {
         } catch (RuntimeException e) {
             msg = fmt;
         }
-        System.err.println("[" + tag + "] " + msg);
+        String line = "[" + tag + "] " + msg;
+        System.err.println(line);
+        java.util.function.Consumer<String> s = sink;
+        if (s != null) {
+            try {
+                s.accept(line);
+            } catch (RuntimeException ignored) {
+                // a broken sink must never break logging
+            }
+        }
     }
 }

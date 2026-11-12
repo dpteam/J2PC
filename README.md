@@ -57,7 +57,10 @@ survives the trip unchanged.
 | Bluetooth (`javax.bluetooth`) | stubs: the API compiles, there is no radio |
 | Launcher + asset loading | done |
 | CLI | done |
-| TUI / GUI | planned |
+| TUI (terminal interface) | done |
+| GUI (local web UI) | done |
+| JAR packaging (`--build`) | done |
+| Native launcher (`--exe`, jpackage) | done |
 
 ### Corpus results
 
@@ -131,6 +134,10 @@ java -jar dist/j2pc.jar [options] <application.jar> [application.jad]
 | `--only <prefix>` | recompile only classes with this internal name prefix |
 | `--indent <str>` | indentation unit (`\t` for a tab) |
 | `--list <jar>` | list archive entries and exit |
+| `--build` | compile the generated sources and package a runnable JAR |
+| `--exe, --native` | also wrap that JAR into a native launcher with `jpackage` |
+| `--tui` | start the terminal interface |
+| `--gui` | start the desktop interface (local web UI) |
 | `-h, --help` | usage |
 | `-V, --version` | version |
 
@@ -148,6 +155,59 @@ java -jar dist/j2pc.jar -o build/out-2048 "samples/2048.jar"
 javac -cp dist/j2pc.jar -d build/gen-2048 build/out-2048/**/*.java
 java -cp "dist/j2pc.jar;build/gen-2048" J2PCLauncher
 ```
+
+## Packaging
+
+`--build` closes the loop: it compiles the generated sources with the JDK's own
+compiler, copies in the emulation runtime, and writes a self-contained JAR.
+
+```bash
+java -jar dist/j2pc.jar --build -o build/out-Tetris samples/Tetris.jar
+# [info] compiled 3 class file(s)
+# [info] collected 138 runtime class file(s)
+# [info] packaged build/out-Tetris/Tetris.jar (142 entries)
+
+java -jar build/out-Tetris/Tetris.jar      # runs with nothing else on the class path
+```
+
+The archive holds the application classes, the `javax.microedition.*` and
+`com.nokia.*` runtime, `j2pc.rt.*`, and the original resources under `assets/`.
+The manifest points at `J2PCLauncher`, so a double click works as well.
+
+`--exe` (or `--native`) goes one step further and wraps the JAR into a native
+launcher with `jpackage` — an app image that needs no Java installation on the
+target machine:
+
+```bash
+java -jar dist/j2pc.jar --exe -o build/out-Tetris samples/Tetris.jar
+# build/out-Tetris/image/Tetris/Tetris.exe
+```
+
+`jpackage` ships with the JDK, not the JRE; when it is missing the tool says so
+and still leaves you a working JAR.
+
+## Interfaces
+
+Three front ends, one engine.
+
+**CLI** — the default, scriptable, used by the corpus harness and CI.
+
+**TUI** — `--tui`. Line-oriented, so it works in any terminal, over SSH, and in
+an IDE console: pick a folder, pick an application, toggle the options, watch the
+log. Colour is dropped automatically when the output is redirected or
+`NO_COLOR` is set.
+
+**GUI** — `--gui`. A local HTTP server on the loopback interface plus a browser
+front end: application list, options, live log, a viewer for the generated
+sources, and a *Play* button that starts the packaged application in its own
+process. The server binds to `127.0.0.1` only and never leaves the machine. On a
+plain JDK the page opens in the system browser next to a small control window;
+with JavaFX on the module path it would embed directly, which is why the front
+end is plain HTML/JS with no build step.
+
+Both interactive front ends give every application its own output folder
+(`out/Tetris/`, `out/2048/`): suites routinely ship a class with the same name,
+and one directory per application keeps them from overwriting each other.
 
 ## How the translation works
 
@@ -255,6 +315,9 @@ src/j2pc/
   emit/          names, modifiers, method and class emitters
   rt/            runtime support for generated code
   jar/           JAR and JAD readers
+  build/         source compiler, JAR packager, jpackage wrapper
+  tui/           terminal interface
+  gui/           local HTTP server and web front end
   tools/         disassembler and analysis tracing helpers
   Main.java      CLI entry point
   Recompiler.java orchestration
@@ -272,8 +335,9 @@ tools/                    batch runner, self test, verifier, error taxonomy
 * [docs/bytecode-to-java.md](docs/bytecode-to-java.md) — translation rules, opcode by opcode
 * [docs/limitations.md](docs/limitations.md) — what does not work yet
 * [docs/deobfuscation.md](docs/deobfuscation.md) — detection and structural rewrites
+* [docs/packaging.md](docs/packaging.md) — JAR and native image output
 * [docs/ci.md](docs/ci.md) — workflows, artifacts, how to reproduce CI locally
-* [docs/roadmap.md](docs/roadmap.md) — TUI, GUI, further work
+* [docs/roadmap.md](docs/roadmap.md) — further work
 * [docs/building.md](docs/building.md) — build and test details
 
 ## License

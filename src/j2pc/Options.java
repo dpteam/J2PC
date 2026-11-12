@@ -26,6 +26,18 @@ public final class Options {
      */
     public boolean generateStubs = true;
 
+    /** Compile the generated sources and package a runnable JAR. */
+    public boolean buildJar;
+
+    /** Wrap the JAR into a native launcher with jpackage. Implies {@link #buildJar}. */
+    public boolean buildNativeImage;
+
+    /** Start the terminal interface instead of recompiling from the command line. */
+    public boolean tui;
+
+    /** Start the desktop interface instead of recompiling from the command line. */
+    public boolean gui;
+
     /** When set, only classes whose internal name starts with this prefix are emitted. */
     public String onlyPrefix;
 }

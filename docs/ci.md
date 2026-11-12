@@ -25,7 +25,9 @@ The synthetic suite is the part of CI that actually proves the translator works.
 | `Hierarchy.java` | inheritance, inner and anonymous classes, enums, static initialisers |
 | `SyntheticMidlet.java` | the full MIDP lifecycle, painting, keys, record stores |
 
-`tools/selftest.sh` (or `.cmd`) checks that everything compiles.
+`tools/selftest.sh` (or `.cmd`) checks that everything compiles, and ends by packaging the
+result into a JAR and asserting that the archive contains the launcher, the MIDP runtime and
+`j2pc.rt` — a packaged application that is missing any of those is not self-contained.
 `tools/verify.sh` (or `.cmd`) goes further: it runs `j2pc.tools.Verifier` against the original
 classes and against the recompiled ones, and diffs the output. Any behavioural difference fails
 the job.
@@ -107,7 +109,7 @@ Or run it manually with an explicit version.
 | Artifact | Contents | Retention |
 |----------|----------|-----------|
 | `j2pc-jar-jdk<N>-<OS>` | the built JAR | 14 days |
-| `self-test-<OS>` | generated sources and the behaviour diff inputs | 14 days |
+| `self-test-<OS>` | generated sources, the packaged application JAR and the behaviour diff inputs | 14 days |
 | `corpus-report-<OS>` | `report.csv` and `javac.log` | 14 days |
 | `release-<tag>` | everything published in the release | 30 days |
 

@@ -1,9 +1,9 @@
 # ---- Build output ----
-build/
-out/
-dist/
-bin/
-target/
+/build/
+/out/
+/dist/
+/bin/
+/target/
 *.class
 *.jar
 !lib/*.jar

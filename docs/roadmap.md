@@ -39,36 +39,7 @@ Not renaming (that needs semantics), but *labelling*:
 Each of these is a local rewrite on the instruction stream, safe because the pattern is
 recognised structurally.
 
-### 3. TUI
-A terminal UI for people who live in a terminal:
-
-* file picker for JAR/JAD,
-* progress and live statistics during recompilation,
-* per-class list with method counts, warnings and failures,
-* view the generated source with syntax highlighting,
-* "recompile → compile → run" in one keystroke.
-
-Plain Java, no dependencies: ANSI escapes plus `JLine`-style raw mode written by hand.
-
-### 4. GUI
-
-A desktop window with a web view — the "launcher" look:
-
-* **Backend**: a tiny HTTP server (`com.sun.net.httpserver`, part of the JDK) that serves a
-  static HTML/JS/CSS bundle and a small JSON API.
-* **Front end**: drag and drop a JAR, choose options, watch a live log, browse generated
-  files, press *Run*.
-* **Shell**: a `JFrame` with a `JEditorPane`/`JWebView`-equivalent. On the JDK alone that means
-  either `JEditorPane` (HTML 3.2, no JS) or bundling a WebView. The pragmatic path is
-  JavaFX's `WebView` when available, falling back to opening the UI in the system browser.
-
-The API is deliberately plain JSON over localhost, so the same front end can be used by:
-
-* the desktop shell,
-* a browser,
-* CI (post a JAR, get a report).
-
-### 5. Vendor extension shims
+### 3. Vendor extension shims
 
 Real games use vendor APIs heavily. In rough order of frequency:
 
@@ -82,14 +53,14 @@ Each is a small adapter over the existing emulation layer.
 
 ## Later
 
-### 6. Smarter MIDP emulation
+### 4. Smarter MIDP emulation
 
 * **Fonts.** Ship a bitmap font that matches handset metrics, so layouts stop shifting.
 * **Audio.** Decode MIDI (via `javax.sound.midi`), WAV and AMR; route `Player` to it.
 * **Timing.** A frame clock that can be throttled to the original speed.
 * **Screens.** Render `Form`/`List` with proper focus, scrolling and soft keys.
 
-### 7. Verification
+### 5. Verification
 
 * **Round-trip tests.** Compile a set of Java sources, recompile them, and compare behaviour on
   a corpus of inputs. *(Started: `tools/verify.sh` and `j2pc.tools.Verifier` already do this for
@@ -99,19 +70,24 @@ Each is a small adapter over the existing emulation layer.
 * **Bytecode-level checks.** Assert that every instruction of the input maps to at least one
   statement of the output.
 
-### 8. Packaging
-
-* one-file executable via `jlink`/`jpackage`,
-* a `j2pc` wrapper script that builds and runs in one step,
-* GitHub Actions: build, run the sample corpus, publish the report. *(Done: see
-  [ci.md](ci.md).)*
-
-### 9. Quality of life
+### 6. Quality of life
 
 * `--report html` — the report as a browsable page with per-method warnings,
 * `--diff` — show what changed between two recompilations,
 * `--stats json` — machine readable statistics,
-* caching so that unchanged classes are not re-emitted.
+* caching so that unchanged classes are not re-emitted,
+* a `j2pc` wrapper script that recompiles, packages and runs in one step,
+* **run from the GUI** — the interface can recompile and package, but not launch yet.
+
+## Done
+
+* **TUI** — `--tui`, line oriented, works in any terminal and over SSH.
+* **GUI** — `--gui`, local HTTP server plus a plain HTML/JS front end; opens in the system
+  browser next to a control window, and embeds in a JavaFX `WebView` when one is present.
+* **Packaging** — `--build` compiles and writes a self-contained JAR, `--exe` wraps it into a
+  native launcher with `jpackage`. See [packaging.md](packaging.md).
+* **CI** — build, self test, verifier and corpus run, with artifacts and checksums.
+  See [ci.md](ci.md).
 
 ## Non-goals
 

@@ -112,6 +112,7 @@ jobs:
           name: self-test-${{ runner.os }}
           path: |
             build/selftest/out
+            build/selftest/pkg
             build/verify/original.txt
             build/verify/recompiled.txt
           if-no-files-found: ignore

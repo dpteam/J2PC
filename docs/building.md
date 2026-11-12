@@ -95,6 +95,40 @@ java -cp "dist/j2pc.jar:build/gen-2048" J2PCLauncher
 # on Windows use ; instead of : in the class path
 ```
 
+Or skip steps 2 and 3 and let the tool do it:
+
+```bash
+java -jar dist/j2pc.jar --build -o build/out-2048 samples/2048.jar
+java -jar build/out-2048/2048.jar
+```
+
+### Packaging check
+
+`tools/selftest.cmd` (and `.sh`) ends with a packaging step: it recompiles the
+synthetic suite, builds the JAR, and asserts that the archive contains the
+launcher, the MIDP runtime and `j2pc.rt`. A packaged JAR that is missing any of
+those is not self-contained, and the check catches it before anyone tries to run
+it on a machine without the tool.
+
+`--exe` is not part of CI: `jpackage` takes a minute per application and needs
+platform tooling. Run it by hand when touching `ExePackager`:
+
+```bash
+java -jar dist/j2pc.jar --exe -o build/out-Tetris samples/Tetris.jar
+build/out-Tetris/image/Tetris/Tetris.exe
+```
+
+### Interfaces
+
+The TUI and the GUI are smoke-tested by hand; both are thin wrappers over the
+same engine, so a regression there shows up as a build failure, not as a wrong
+translation.
+
+```bash
+java -jar dist/j2pc.jar --tui      # quit with 4
+java -jar dist/j2pc.jar --gui      # prints the URL; close the window to stop
+```
+
 The launcher reads `assets/` next to the generated sources, so run it from the project root or
 pass an explicit class path that includes the output directory.
 

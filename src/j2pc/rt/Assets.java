@@ -248,9 +248,20 @@ public final class Assets {
         if (in != null) {
             return in;
         }
+        // A packaged application stores its resources under "assets/" inside the
+        // archive, while the code still asks for "/icon.png". Without this
+        // fallback a self-contained JAR would need an assets directory next to it.
+        in = Assets.class.getResourceAsStream("/assets/" + cleaned);
+        if (in != null) {
+            return in;
+        }
         ClassLoader loader = Assets.class.getClassLoader();
         if (loader != null) {
             in = loader.getResourceAsStream(cleaned);
+            if (in != null) {
+                return in;
+            }
+            in = loader.getResourceAsStream("assets/" + cleaned);
             if (in != null) {
                 return in;
             }
