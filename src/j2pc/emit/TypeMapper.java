@@ -57,14 +57,14 @@ public final class TypeMapper {
         }
         if (fromArray != toArray) {
             // javac only allows a cast between a class and an array when the class
-            // is Object, Cloneable, Serializable or an interface. `(int[])(b)` is
-            // rejected outright, even though the JVM would check it at run time.
+            // is Object, Cloneable, Serializable or an interface. Anything else has
+            // to be routed through Object, which performs the same runtime check.
             String cls = fromArray ? to : from;
             return "java/lang/Object".equals(cls)
                     || "java/lang/Cloneable".equals(cls)
                     || "java/io/Serializable".equals(cls)
                     || interfaces.contains(cls)
-                    || !appClasses.contains(cls);
+                    || stubs.contains(cls);
         }
         if (stubs.contains(from) || stubs.contains(to)
                 || interfaces.contains(from) || interfaces.contains(to)) {

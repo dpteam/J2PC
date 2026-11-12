@@ -79,7 +79,7 @@ public class ChoiceGroup extends Item implements Choice {
     }
 
     @Override
-    public void append(String part, Image imagePart) {
+    public int append(String part, Image imagePart) {
         String[] s = new String[strings.length + 1];
         Image[] im = new Image[images.length + 1];
         boolean[] sel = new boolean[selected.length + 1];
@@ -91,6 +91,7 @@ public class ChoiceGroup extends Item implements Choice {
         strings = s;
         images = im;
         selected = sel;
+        return strings.length - 1;
     }
 
     @Override

@@ -137,7 +137,7 @@ public final class MIDletHost {
     private static void showControls(String title) {
         String text = "Keyboard\n"
                 + "  Arrows / W A S D .............. move (UP, LEFT, DOWN, RIGHT)\n"
-                + "  Enter, Space, Numpad 5 ........ FIRE / select\n"
+                + "  Enter, Space .................. FIRE / select\n"
                 + "  Q or F1 ....................... GAME_A\n"
                 + "  E or F2 ....................... GAME_B\n"
                 + "  R or F3 ....................... GAME_C\n"

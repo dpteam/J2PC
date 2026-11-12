@@ -25,7 +25,15 @@ public interface Choice {
 
     void setSelectedFlags(boolean[] selectedArray);
 
-    void append(String stringPart, Image imagePart);
+    /**
+     * Appends an element and returns its index.
+     *
+     * <p>MIDP returns the new element's index. Callers written against a
+     * {@code void} signature simply ignore the result, so returning it keeps both
+     * kinds of suite compiling — and a suite that implements this interface must
+     * match the real signature or javac reports "cannot implement".</p>
+     */
+    int append(String stringPart, Image imagePart);
 
     void insert(int elementNum, String stringPart, Image imagePart);
 

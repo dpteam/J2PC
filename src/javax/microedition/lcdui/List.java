@@ -58,8 +58,8 @@ public class List extends Screen implements Choice {
     }
 
     @Override
-    public void append(String part, Image imagePart) {
-        group.append(part, imagePart);
+    public int append(String part, Image imagePart) {
+        return group.append(part, imagePart);
     }
 
     @Override

@@ -220,7 +220,7 @@ host except the menu bar.
 | Input | MIDP meaning |
 |-------|--------------|
 | Arrows, `W` `A` `S` `D` | `UP`, `LEFT`, `DOWN`, `RIGHT` |
-| `Enter`, `Space`, numpad `5` | `FIRE` / select |
+| `Enter`, `Space` | `FIRE` / select |
 | `Q` or `F1` | `GAME_A` |
 | `E` or `F2` | `GAME_B` |
 | `R` or `F3` | `GAME_C` |

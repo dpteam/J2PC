@@ -121,8 +121,7 @@ public abstract class Canvas extends Displayable {
             case java.awt.event.KeyEvent.VK_RIGHT:
             case java.awt.event.KeyEvent.VK_D: return RIGHT;
             case java.awt.event.KeyEvent.VK_ENTER:
-            case java.awt.event.KeyEvent.VK_SPACE:
-            case KEY_NUM5: return FIRE;
+            case java.awt.event.KeyEvent.VK_SPACE: return FIRE;
             case java.awt.event.KeyEvent.VK_F1:
             case java.awt.event.KeyEvent.VK_Q: return GAME_A;
             case java.awt.event.KeyEvent.VK_F2:

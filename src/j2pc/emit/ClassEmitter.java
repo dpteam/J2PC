@@ -120,6 +120,7 @@ public final class ClassEmitter {
         emitStaticInitializer();
 
         if (!cf.isAbstract() && !cf.isInterface()) {
+            emitImplicitConstructorIfNeeded();
             emitMissingAbstractStubs();
         }
 
@@ -134,9 +135,97 @@ public final class ClassEmitter {
         return out.toString();
     }
 
+    /**
+     * Emits a constructor when the archive record has none.
+     *
+     * <p>Java inserts an implicit no-argument constructor that calls
+     * {@code super()}. That only compiles when the superclass has such a
+     * constructor; when the archive lost the record and the superclass takes
+     * arguments, the implicit one fails to compile. The class could not be
+     * instantiated on a handset either — a class file without a constructor
+     * raises {@code NoSuchMethodError} — so a constructor that throws keeps both
+     * the compilation and the behaviour, and says why.</p>
+     */
+    private void emitImplicitConstructorIfNeeded() {
+        for (ClassFile.Member m : cf.methods) {
+            if ("<init>".equals(m.name())) {
+                return;
+            }
+        }
+        ClassFile parent = universe.get(cf.superName());
+        if (parent == null || hasNoArgConstructor(parent)) {
+            // The implicit constructor javac inserts is exactly right.
+            return;
+        }
+        out.blank();
+        out.line("// The archive record of this class has no constructor.");
+        out.line("// The superclass has no no-argument constructor, so the implicit one");
+        out.line("// would not compile; instantiation failed on a handset as well.");
+        out.line("public " + Names.simpleName(cf.name()) + "() {");
+        out.indent();
+        // Java still requires a super(...) call, so the cheapest superclass
+        // constructor is called with default arguments before the failure. The
+        // object is never returned, so its state does not matter.
+        String[] cheapest = cheapestConstructor(parent);
+        if (cheapest != null) {
+            out.line("super(" + defaultArgs(cheapest) + ");");
+        }
+        out.line("throw new NoSuchMethodError(\"" + Names.external(cf.name())
+                + " has no constructor\");");
+        out.outdent();
+        out.line("}");
+    }
+
+    /** Descriptor of the superclass constructor with the fewest arguments. */
+    private static String[] cheapestConstructor(ClassFile owner) {
+        String[] best = null;
+        for (ClassFile.Member m : owner.methods) {
+            if (!"<init>".equals(m.name()) || m.desc() == null) {
+                continue;
+            }
+            String[] args = Descriptor.args(m.desc());
+            if (best == null || args.length < best.length) {
+                best = args;
+            }
+        }
+        return best;
+    }
+
+    /** {@code null, 0, false} for each parameter of {@code args}. */
+    private static String defaultArgs(String[] args) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            String a = args[i];
+            switch (a.charAt(0)) {
+                case 'Z': sb.append("false"); break;
+                case 'J': sb.append("0L"); break;
+                case 'F': sb.append("0f"); break;
+                case 'D': sb.append("0d"); break;
+                case 'L':
+                case '[':
+                    sb.append("null");
+                    break;
+                default:
+                    sb.append('0');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean hasNoArgConstructor(ClassFile owner) {
+        for (ClassFile.Member m : owner.methods) {
+            if ("<init>".equals(m.name()) && "()V".equals(m.desc())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Appends the members that the archive record of this class is missing. */
-    private void emitExtraMembers() {
-        if (extraMembers.isEmpty()) {
+    private void emitExtraMembers() {        if (extraMembers.isEmpty()) {
             return;
         }
         out.blank();

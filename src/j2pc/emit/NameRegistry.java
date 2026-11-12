@@ -236,6 +236,16 @@ public final class NameRegistry {
     }
 
     /**
+     * The class file of {@code internal}, when it is part of the archive.
+     *
+     * <p>Lets a caller walk a hierarchy it does not own: the emitter needs it to
+     * know whether a superclass constructor forces a {@code throws} clause.</p>
+     */
+    public ClassFile classFile(String internal) {
+        return internal == null ? null : byName.get(internal);
+    }
+
+    /**
      * Name of a method as declared in {@code owner}.
      *
      * <p>Two different signatures can still land on one base name when their raw

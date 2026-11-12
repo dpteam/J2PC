@@ -25,7 +25,13 @@ public class Form extends Screen {
         return items[index];
     }
 
-    public void append(Item item) {
+    /**
+     * Appends an item and returns its index.
+     *
+     * <p>MIDP returns {@code int}; a caller that ignores the value still compiles,
+     * and a suite that implements the interface keeps matching the real signature.</p>
+     */
+    public int append(Item item) {
         if (item == null) {
             throw new NullPointerException("item");
         }
@@ -33,14 +39,15 @@ public class Form extends Screen {
         System.arraycopy(items, 0, next, 0, items.length);
         next[items.length] = item;
         items = next;
+        return items.length - 1;
     }
 
-    public void append(String text) {
-        append(new StringItem(null, text));
+    public int append(String text) {
+        return append(new StringItem(null, text));
     }
 
-    public void append(Image img) {
-        append(new ImageItem(null, img, ImageItem.LAYOUT_DEFAULT, null));
+    public int append(Image img) {
+        return append(new ImageItem(null, img, ImageItem.LAYOUT_DEFAULT, null));
     }
 
     public void insert(int index, Item item) {
