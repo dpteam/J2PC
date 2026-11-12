@@ -65,6 +65,25 @@ public interface DirectGraphics {
 
     Graphics getGraphics();
 
+    /** Reads pixels in the native format; only the 8888/565 variants are honoured. */
+    void getPixels(int[] dest, int offset, int scanlength, int x, int y, int width, int height,
+                   int manipulation);
+
+    void getPixels(byte[] dest, int offset, int scanlength, int x, int y, int width, int height,
+                   int manipulation);
+
+    void getPixels(short[] dest, int offset, int scanlength, int x, int y, int width, int height,
+                   int manipulation);
+
+    void drawPixels(int[] source, boolean transparency, int offset, int scanlength,
+                    int x, int y, int width, int height, int manipulation, int format);
+
+    void drawPixels(byte[] source, boolean transparency, int offset, int scanlength,
+                    int x, int y, int width, int height, int manipulation, int format);
+
+    void drawPixels(short[] source, boolean transparency, int offset, int scanlength,
+                    int x, int y, int width, int height, int manipulation, int format);
+
     /** Returns the display colour of the given index, as the vendor API does. */
     int getDisplayColor(int color);
 

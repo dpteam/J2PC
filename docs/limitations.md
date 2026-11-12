@@ -123,15 +123,17 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 27 produce Java that
-compiles. The rest fail on **missing APIs**, not on wrong translation:
+On a private collection of 151 applications, all 151 recompile and 43 produce Java that
+compiles (735 classes, 20 552 methods). The rest fail on **missing APIs** or on suites that
+ship only part of their classes:
 
-| Missing | Applications |
-|---------|--------------|
+| Missing / broken | Applications |
+|------------------|--------------|
 | `javax.microedition.m3g` (3D engine) | 12 |
 | `com.mascotcapsule.micro3d.v3` (3D engine) | ~8 |
-| `javax.microedition.pim` | ~4 |
-| `javax.wireless.messaging` | ~2 |
+| `javax.microedition.sensor` | ~3 |
+| `javax.wireless.messaging` | ~3 |
+| incomplete JARs (classes referenced but not shipped) | remainder |
 | vendor extensions (`com.siemens`, `com.motorola`, …) | remainder |
 
 Implementing a 3D engine is a separate project; the 2D platform is what this tool targets.

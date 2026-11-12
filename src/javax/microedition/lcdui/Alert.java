@@ -27,6 +27,33 @@ public class Alert extends Screen {
         this.type = alertType;
     }
 
+    /**
+     * MIDP 2.0 overload that takes an {@link AlertType} constant.
+     *
+     * <p>Bytecode compiled against the newer signature calls this one; without it
+     * the generated source does not compile even though both forms describe the
+     * same alert.</p>
+     */
+    public Alert(String title, String alertText, Image alertImage, AlertType alertType) {
+        this(title, alertText, alertImage, typeCode(alertType));
+    }
+
+    private static int typeCode(AlertType alertType) {
+        if (alertType == null || alertType == AlertType.INFO) {
+            return ALERT_INFO;
+        }
+        if (alertType == AlertType.WARNING) {
+            return ALERT_WARNING;
+        }
+        if (alertType == AlertType.ERROR) {
+            return ALERT_ERROR;
+        }
+        if (alertType == AlertType.ALARM) {
+            return ALERT_ALARM;
+        }
+        return ALERT_DEFAULT;
+    }
+
     public String getString() {
         return string;
     }
@@ -57,6 +84,11 @@ public class Alert extends Screen {
 
     public void setType(int type) {
         this.type = type;
+    }
+
+    /** MIDP 2.0 overload taking an {@link AlertType} constant. */
+    public void setType(AlertType type) {
+        this.type = typeCode(type);
     }
 
     public Gauge getIndicator() {

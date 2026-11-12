@@ -581,6 +581,87 @@ public final class Graphics implements com.nokia.mid.ui.DirectGraphics {
     }
 
     @Override
+    public void getPixels(int[] dest, int offset, int scanlength, int x, int y, int width,
+                          int height, int manipulation) {
+        getRGB(dest, offset, scanlength, x, y, width, height, manipulation);
+    }
+
+    @Override
+    public void getPixels(byte[] dest, int offset, int scanlength, int x, int y, int width,
+                          int height, int manipulation) {
+        int[] tmp = new int[width * height];
+        getRGB(tmp, 0, width, x, y, width, height, manipulation);
+        for (int i = 0; i < tmp.length; i++) {
+            int v = tmp[i];
+            int r = (v >> 16) & 0xFF;
+            int g2 = (v >> 8) & 0xFF;
+            int b = v & 0xFF;
+            // 332 layout, the only byte format the vendor API defines.
+            dest[offset + i] = (byte) (((r & 0xE0)) | ((g2 & 0xE0) >> 3) | ((b & 0xC0) >> 6));
+        }
+    }
+
+    @Override
+    public void getPixels(short[] dest, int offset, int scanlength, int x, int y, int width,
+                          int height, int manipulation) {
+        int[] tmp = new int[width * height];
+        getRGB(tmp, 0, width, x, y, width, height, manipulation);
+        for (int i = 0; i < tmp.length; i++) {
+            int v = tmp[i];
+            int r = (v >> 19) & 0x1F;
+            int g2 = (v >> 10) & 0x3F;
+            int b = (v >> 3) & 0x1F;
+            dest[offset + i] = (short) ((r << 11) | (g2 << 5) | b);
+        }
+    }
+
+    @Override
+    public void drawPixels(int[] source, boolean transparency, int offset, int scanlength,
+                           int x, int y, int width, int height, int manipulation, int format) {
+        int[] rgb = new int[width * height];
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int v = source[offset + row * scanlength + col];
+                rgb[row * width + col] = transparency ? v : (v | 0xFF000000);
+            }
+        }
+        drawRGB(rgb, 0, width, x, y, width, height, transparency);
+    }
+
+    @Override
+    public void drawPixels(byte[] source, boolean transparency, int offset, int scanlength,
+                           int x, int y, int width, int height, int manipulation, int format) {
+        int[] rgb = new int[width * height];
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int v = source[offset + row * scanlength + col] & 0xFF;
+                int r = v & 0xE0;
+                int g2 = (v << 3) & 0xE0;
+                int b = (v << 6) & 0xC0;
+                rgb[row * width + col] = 0xFF000000 | (r << 16) | (g2 << 8) | b;
+            }
+        }
+        drawRGB(rgb, 0, width, x, y, width, height, false);
+    }
+
+    @Override
+    public void drawPixels(short[] source, boolean transparency, int offset, int scanlength,
+                           int x, int y, int width, int height, int manipulation, int format) {
+        int[] rgb = new int[width * height];
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int v = source[offset + row * scanlength + col] & 0xFFFF;
+                int r = (v >> 11) & 0x1F;
+                int g2 = (v >> 5) & 0x3F;
+                int b = v & 0x1F;
+                rgb[row * width + col] = 0xFF000000
+                        | ((r << 3) << 16) | ((g2 << 2) << 8) | (b << 3);
+            }
+        }
+        drawRGB(rgb, 0, width, x, y, width, height, false);
+    }
+
+    @Override
     public int blend(int source, int destination, int alpha) {
         int a = alpha & 0xFF;
         int sr = (source >> 16) & 0xFF;

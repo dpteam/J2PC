@@ -5,7 +5,9 @@ import j2pc.classfile.ClassFile;
 import j2pc.classfile.Descriptor;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Renders a whole {@link ClassFile} as a Java compilation unit. */
 public final class ClassEmitter {
@@ -15,12 +17,16 @@ public final class ClassEmitter {
     private final SourceWriter out;
     private final NameRegistry names;
     private final TypeMapper types;
+    /** Every class of the application, so supertypes can be inspected. */
+    private final Map<String, ClassFile> universe;
 
-    public ClassEmitter(ClassFile cf, Options opts, NameRegistry names, TypeMapper types) {
+    public ClassEmitter(ClassFile cf, Options opts, NameRegistry names, TypeMapper types,
+                        Map<String, ClassFile> universe) {
         this.cf = cf;
         this.opts = opts;
         this.names = names;
         this.types = types;
+        this.universe = universe;
         this.out = new SourceWriter(opts.indentUnit);
     }
 
@@ -109,6 +115,10 @@ public final class ClassEmitter {
 
         emitStaticInitializer();
 
+        if (!cf.isAbstract() && !cf.isInterface()) {
+            emitMissingAbstractStubs();
+        }
+
         if (!any) {
             out.line("// no members");
         }
@@ -125,6 +135,93 @@ public final class ClassEmitter {
             }
         }
         return false;
+    }
+
+    /**
+     * Emits stubs for abstract methods the class does not implement.
+     *
+     * <p>The JVM does not require a concrete class to implement every interface
+     * method — calling a missing one raises {@code AbstractMethodError} at run
+     * time. Java source does require it, so a stub that throws the same error
+     * keeps both the compilation and the behaviour intact.</p>
+     */
+    private void emitMissingAbstractStubs() {
+        Map<String, ClassFile.Member> missing = new LinkedHashMap<>();
+        Map<String, String> declaredBy = new LinkedHashMap<>();
+        collectAbstract(cf.superName(), missing, declaredBy, 0);
+        for (String itf : cf.interfaceNames()) {
+            collectAbstract(itf, missing, declaredBy, 0);
+        }
+        for (ClassFile.Member m : cf.methods) {
+            // Only a non-static method can satisfy an abstract instance method;
+            // bytecode happily declares a static one with the same signature.
+            if (!m.isStatic()) {
+                missing.remove(m.name() + m.desc());
+            }
+        }
+        if (missing.isEmpty()) {
+            return;
+        }
+        java.util.Set<String> usedNames = new java.util.HashSet<>();
+        for (Map.Entry<String, ClassFile.Member> e : missing.entrySet()) {
+            ClassFile.Member m = e.getValue();
+            String owner = declaredBy.get(e.getKey());
+            // The stub must carry the name the declaring type gave the method,
+            // otherwise it does not implement anything.
+            String name = names.method(owner == null ? cf.name() : owner, m.name(), m.desc());
+            if (!usedNames.add(name + Descriptor.args(m.desc()).length)) {
+                continue;
+            }
+            out.blank();
+            String ret = Descriptor.returnType(m.desc());
+            StringBuilder sig = new StringBuilder("public ");
+            sig.append(types.ref(ret)).append(' ').append(name).append('(');
+            String[] args = Descriptor.args(m.desc());
+            for (int i = 0; i < args.length; i++) {
+                if (i > 0) {
+                    sig.append(", ");
+                }
+                sig.append(types.ref(args[i])).append(" arg").append(i);
+            }
+            sig.append(") {");
+            out.line(sig.toString());
+            out.indent();
+            out.line("throw new AbstractMethodError(\"not implemented: "
+                    + Names.external(m.name()) + "\");");
+            out.outdent();
+            out.line("}");
+        }
+    }
+
+    /** Adds every abstract method reachable from {@code internal}, recursively. */
+    private void collectAbstract(String internal, Map<String, ClassFile.Member> out,
+                                 Map<String, String> declaredBy, int depth) {
+        if (internal == null || depth > 16) {
+            return;
+        }
+        ClassFile superType = universe.get(internal);
+        if (superType == null) {
+            return;
+        }
+        for (ClassFile.Member m : superType.methods) {
+            if (m.name() == null || m.desc() == null) {
+                continue;
+            }
+            String key = m.name() + m.desc();
+            if (m.isAbstract()) {
+                if (!out.containsKey(key)) {
+                    out.put(key, m);
+                    declaredBy.put(key, internal);
+                }
+            } else if (!m.isStatic()) {
+                // A concrete instance implementation anywhere satisfies it.
+                out.remove(key);
+            }
+        }
+        collectAbstract(superType.superName(), out, declaredBy, depth + 1);
+        for (String itf : superType.interfaceNames()) {
+            collectAbstract(itf, out, declaredBy, depth + 1);
+        }
     }
 
     private void emitField(ClassFile.Member f) {
@@ -305,18 +402,31 @@ public final class ClassEmitter {
     }
 
     /**
-     * Rewrites {@code ThisInterface.field} into {@code holder.field}.
+     * Rewrites a reference to one of this interface's own fields into a reference
+     * to the holder class.
      *
-     * <p>Only a qualified reference at a statement boundary is rewritten. A plain
-     * substring replace would corrupt unrelated names: for an interface called
-     * {@code lang} it would turn {@code java.lang.String} into
-     * {@code java.__init.String}.</p>
+     * <p>Both {@code b.a_f2} and the fully qualified {@code unpackaged.b.a_f2} have
+     * to be caught: the emitter writes the qualified form once the class has been
+     * moved into a package, and an interface field is implicitly {@code final}, so
+     * a missed redirect produces "cannot assign a value to static final".</p>
+     *
+     * <p>The match must also be anchored: a plain substring replace would corrupt
+     * unrelated names, turning {@code java.lang.String} into
+     * {@code java.__init.String} for an interface called {@code lang}.</p>
      */
     private String redirectOwnFields(String line, String holder) {
         String simple = types.simpleName(cf.name());
+        String pkg = types.packageOf(cf.name());
+        String out = line;
+        if (!pkg.isEmpty()) {
+            String qualified = pkg + "." + simple;
+            java.util.regex.Pattern q = java.util.regex.Pattern.compile(
+                    "(?<![\\w$.])" + java.util.regex.Pattern.quote(qualified) + "\\.");
+            out = q.matcher(out).replaceAll(holder + ".");
+        }
         java.util.regex.Pattern p = java.util.regex.Pattern.compile(
-                "(^|[^\\w.$])" + java.util.regex.Pattern.quote(simple) + "\\.");
-        return p.matcher(line).replaceAll("$1" + holder + ".");
+                "(?<![\\w$.])" + java.util.regex.Pattern.quote(simple) + "\\.");
+        return p.matcher(out).replaceAll(holder + ".");
     }
 
     /**

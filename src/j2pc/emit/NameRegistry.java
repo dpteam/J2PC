@@ -6,142 +6,167 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Application-wide registry of Java identifiers.
  *
  * <p>Names have to be assigned once per <em>declaring</em> class, not per
- * reference: otherwise a method referenced from two different classes could
- * receive two different numbers and the generated code would not link. Every
- * class of the application is registered before any source is emitted.</p>
+ * reference: otherwise a method referenced from another class could receive two
+ * different numbers and the generated code would not link. Every class of the
+ * application is registered before any source is emitted.</p>
  *
  * <p>Classes outside the application (the JDK and the MIDP emulation layer) are
  * never renamed: their members keep the names the platform actually uses.</p>
  *
- * <h2>Inheritance</h2>
+ * <h2>Method names must be hierarchy-wide</h2>
  *
- * <p>Two constraints pull in opposite directions:</p>
+ * <p>A method's Java name is derived only from its own signature — raw name,
+ * parameter list, return type and staticness — and never from its class. That is
+ * what makes an override keep the name of the method it overrides, and what makes
+ * an implementation keep the name of the interface method it implements.</p>
+ *
+ * <p>Two things force a suffix:</p>
  *
  * <ul>
- *   <li>a method that <em>overrides</em> an inherited one must keep the inherited
- *       name, otherwise virtual dispatch breaks;</li>
- *   <li>a method that does <em>not</em> override must not accidentally take an
- *       inherited name, otherwise javac rejects the class as an illegal override
- *       or hide (a static method cannot hide an instance method, and a narrower
- *       access modifier cannot override a wider one).</li>
+ *   <li>Java has no return-type overloading, so a signature that appears with
+ *       different return types anywhere in the application gets one;</li>
+ *   <li>a static method may not hide an instance method, so staticness is part of
+ *       the suffix.</li>
  * </ul>
  *
- * <p>Both are satisfied by registering superclasses first: genuine overrides
- * inherit the parent's Java name, and every other method avoids the names that
- * are already visible in the class.</p>
+ * <p>Suffixing is computed over the whole application precisely so that a class
+ * and its supertype always agree.</p>
  */
 public final class NameRegistry {
 
     private final Map<String, ClassNames> classes = new HashMap<>();
-    private final Map<String, String> superOf = new HashMap<>();
+    private final Map<String, String> methodNames = new HashMap<>();
     private final Set<String> typeNames = new HashSet<>();
-    private final Set<String> ambiguous = new HashSet<>();
 
-    /**
-     * Assigns the final Java names for every member of every class, superclasses
-     * before subclasses.
-     */
+    /** Assigns the final Java names for every member of every class. */
     public void registerAll(java.util.Collection<ClassFile> all) {
-        Map<String, ClassFile> byName = new HashMap<>();
         for (ClassFile cf : all) {
-            byName.put(cf.name(), cf);
             typeNames.add(Names.simpleName(cf.name()));
-            if (cf.superName() != null) {
-                superOf.put(cf.name(), cf.superName());
-            }
         }
         typeNames.addAll(PLATFORM_TYPES);
 
-        // Return-type overloading is the one case Java cannot express. It is
-        // detected over the whole application, not per class, so that a method
-        // receives the same Java name in a superclass and in every subclass.
-        Map<String, Set<String>> returnsBySig = new HashMap<>();
+        // A signature that carries more than one return type cannot be expressed
+        // in Java without a suffix.
+        Map<String, Set<String>> returnsBySignature = new HashMap<>();
         for (ClassFile cf : all) {
             for (ClassFile.Member m : cf.methods) {
+                if (m.name() == null || m.desc() == null) {
+                    continue;
+                }
                 String sig = m.name() + paramSignature(m.desc());
-                returnsBySig.computeIfAbsent(sig, k -> new HashSet<>())
+                returnsBySignature.computeIfAbsent(sig, k -> new HashSet<>())
                         .add(returnType(m.desc()));
             }
         }
-        for (Map.Entry<String, Set<String>> e : returnsBySig.entrySet()) {
-            if (e.getValue().size() > 1) {
-                ambiguous.add(e.getKey());
+
+        // Build the global method table in a stable order so the result does not
+        // depend on iteration order.
+        Map<String, String> keys = new TreeMap<>();
+        for (ClassFile cf : all) {
+            for (ClassFile.Member m : cf.methods) {
+                if (m.name() == null || m.desc() == null) {
+                    continue;
+                }
+                keys.put(methodKey(m), methodKey(m));
+                staticFlags.put(cf.name() + '\u0000' + m.name() + m.desc(), m.isStatic());
             }
+        }
+        // The base name is a pure function of the signature, so a class and its
+        // supertype always agree. Uniqueness inside one class is handled later,
+        // where the other members of that class are known.
+        for (String key : keys.keySet()) {
+            String[] parts = key.split("\\u0000", -1);
+            String raw = parts[0];
+            String paramSig = parts[1];
+            String returnType = parts[2];
+            boolean isStatic = "S".equals(parts[3]);
+
+            String base = Names.identifier(raw);
+            if (returnsBySignature.getOrDefault(raw + paramSig, Set.of()).size() > 1) {
+                base = base + (isStatic ? "_S" : "_I") + returnTag(returnType);
+            }
+            methodNames.put(key, base);
         }
 
         for (ClassFile cf : all) {
-            registerWithAncestors(cf, byName, new HashSet<>());
+            register(cf);
         }
-    }
-
-    /** Registers {@code cf} after its superclasses, so overrides see their parent. */
-    private void registerWithAncestors(ClassFile cf, Map<String, ClassFile> byName, Set<String> path) {
-        if (classes.containsKey(cf.name()) || !path.add(cf.name())) {
-            return;
-        }
-        String parent = cf.superName();
-        ClassFile parentFile = parent == null ? null : byName.get(parent);
-        if (parentFile != null) {
-            registerWithAncestors(parentFile, byName, path);
-        }
-        register(cf);
     }
 
     /** Assigns the final Java names for every member of {@code cf}. */
     public void register(ClassFile cf) {
         ClassNames names = new ClassNames();
         names.usedFields.addAll(typeNames);
-        names.usedMethods.addAll(typeNames);
-
-        // Reserve every raw identifier first, so a generated suffix (from the
-        // return-type tag) can never land on a name that some other method
-        // already uses literally.
-        for (ClassFile.Member m : cf.methods) {
-            names.usedMethods.add(Names.identifier(m.name()));
-        }
-
         for (ClassFile.Member f : cf.fields) {
+            if (f.name() == null || f.desc() == null) {
+                continue;
+            }
             names.field.put(f.name() + ":" + f.desc(), names.uniqueField(f.name()));
         }
-        // Java overloads by parameter list, exactly like the JVM. Methods that
-        // differ only in their return type are the single case Java cannot
-        // express; those get a deterministic suffix derived from the return type,
-        // computed application-wide so a subclass keeps the superclass name.
-        java.util.List<ClassFile.Member> ordered = new java.util.ArrayList<>();
+        // Assign the declared methods in a stable order, so that a residual clash
+        // is resolved the same way no matter which class is emitted first.
+        java.util.List<String> keys = new java.util.ArrayList<>();
         for (ClassFile.Member m : cf.methods) {
-            ordered.add(m);
-        }
-        ordered.sort(java.util.Comparator
-                .comparing(ClassFile.Member::name)
-                .thenComparing(ClassFile.Member::desc));
-
-        for (ClassFile.Member m : ordered) {
-            String raw = m.name();
-            String sig = raw + paramSignature(m.desc());
-            String base = Names.identifier(raw);
-            if (ambiguous.contains(sig)) {
-                // Include staticness: a static and an instance method may legally
-                // share a name and signature in different classes of a hierarchy,
-                // but Java forbids one hiding the other.
-                boolean isStatic = (m.access & ClassFile.ACC_STATIC) != 0;
-                base = base + (isStatic ? "_S" : "_I") + returnTag(returnType(m.desc()));
+            if (m.name() != null && m.desc() != null) {
+                keys.add(methodKey(m));
             }
-            // The plain name is already reserved, so unique() only renames when a
-            // suffix was needed or the sanitised name collides with another one.
-            String assigned = base.equals(Names.identifier(raw)) && !ambiguous.contains(sig)
-                    ? base : names.uniqueMethod(base);
-            names.method.put(raw + m.desc(), assigned);
+        }
+        java.util.Collections.sort(keys);
+        for (String key : keys) {
+            String base = methodNames.get(key);
+            if (base != null && !names.methodNames.containsKey(key)) {
+                names.methodNames.put(key, names.uniqueMethod(base));
+            }
         }
         classes.put(cf.name(), names);
         typeNames.add(Names.simpleName(cf.name()));
     }
 
-    /** {@code (I)V -> (I)}, so overloads keep one name and bridges collapse. */
+    /**
+     * Name of a method as declared in {@code owner}.
+     *
+     * <p>Two different signatures can still land on one base name when their raw
+     * names sanitise to the same identifier, so the declaring class resolves the
+     * residual clash. That resolution is per class and therefore never changes the
+     * name a supertype or interface chose for the same signature.</p>
+     */
+    public String method(String owner, String name, String desc) {
+        boolean isStatic = isStaticMethod(owner, name, desc);
+        String key = methodKey(name, desc, isStatic);
+        String base = methodNames.get(key);
+        if (base == null) {
+            return Names.external(name);
+        }
+        ClassNames names = classes.get(owner);
+        if (names == null) {
+            return base;
+        }
+        String resolved = names.methodNames.get(key);
+        if (resolved == null) {
+            resolved = names.uniqueMethod(base);
+            names.methodNames.put(key, resolved);
+        }
+        return resolved;
+    }
+
+    private static String methodKey(ClassFile.Member m) {
+        boolean isStatic = (m.access & ClassFile.ACC_STATIC) != 0;
+        return m.name() + '\u0000' + paramSignature(m.desc()) + '\u0000'
+                + returnType(m.desc()) + '\u0000' + (isStatic ? "S" : "I");
+    }
+
+    private static String methodKey(String name, String desc, boolean isStatic) {
+        return name + '\u0000' + paramSignature(desc) + '\u0000'
+                + returnType(desc) + '\u0000' + (isStatic ? "S" : "I");
+    }
+
+    /** {@code (I)V -> (I)}: the part Java overloads on. */
     private static String paramSignature(String desc) {
         int close = desc.indexOf(')');
         return close < 0 ? desc : desc.substring(0, close + 1);
@@ -187,13 +212,20 @@ public final class NameRegistry {
         return mapped == null ? Names.external(name) : mapped;
     }
 
-    public String method(String owner, String name, String desc) {
-        ClassNames names = classes.get(owner);
-        if (names == null) {
-            return Names.external(name);
+    /**
+     * Staticness is part of the method key, so it has to be known when looking a
+     * name up. It is recorded during {@link #registerAll} for application classes.
+     */
+    private final Map<String, Boolean> staticFlags = new HashMap<>();
+
+    private boolean isStaticMethod(String owner, String name, String desc) {
+        Boolean known = staticFlags.get(owner + '\u0000' + name + desc);
+        if (known != null) {
+            return known;
         }
-        String mapped = names.method.get(name + desc);
-        return mapped == null ? Names.external(name) : mapped;
+        // Unknown owner: an instance method is the common case, and a wrong guess
+        // only matters for return-type-overloaded signatures.
+        return false;
     }
 
     /**
@@ -214,25 +246,25 @@ public final class NameRegistry {
 
     private static final class ClassNames {
         final Map<String, String> field = new HashMap<>();
-        final Map<String, String> method = new HashMap<>();
-        final Map<String, String> byParamSig = new HashMap<>();
-        final Map<String, Boolean> bridgeOnly = new HashMap<>();
+        final Map<String, String> methodNames = new HashMap<>();
         final Set<String> usedFields = new HashSet<>();
         final Set<String> usedMethods = new HashSet<>();
 
         String uniqueField(String raw) {
-            return unique(usedFields, Names.identifier(raw), "_f");
-        }
-
-        String uniqueMethod(String raw) {
-            return unique(usedMethods, Names.identifier(raw), "_m");
-        }
-
-        private static String unique(Set<String> used, String base, String suffix) {
+            String base = Names.identifier(raw);
             String candidate = base;
             int n = 2;
-            while (!used.add(candidate)) {
-                candidate = base + suffix + n++;
+            while (!usedFields.add(candidate)) {
+                candidate = base + "_f" + n++;
+            }
+            return candidate;
+        }
+
+        String uniqueMethod(String base) {
+            String candidate = base;
+            int n = 2;
+            while (!usedMethods.add(candidate)) {
+                candidate = base + "_m" + n++;
             }
             return candidate;
         }

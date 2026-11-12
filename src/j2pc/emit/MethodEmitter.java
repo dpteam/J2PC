@@ -186,15 +186,15 @@ public final class MethodEmitter {
      * statement of a constructor, but the JVM allows work before it — inner
      * classes assign their synthetic {@code this$0} field first, for example.
      *
-     * <p>The call is therefore moved to the front. That is safe when it takes no
-     * arguments: nothing can observe the object before {@code super()} returns,
-     * because every instance method needs the object to be constructed.</p>
+     * <p>The call is therefore moved to the front. That is safe because nothing
+     * can observe the object before {@code super()} returns: every instance method
+     * needs the object to be constructed first.</p>
      */
     private static String reorderSuperFirst(java.util.List<String> lines) {
         int callIndex = -1;
         for (int i = 0; i < lines.size(); i++) {
             String t = lines.get(i).trim();
-            if (t.equals("super();") || t.equals("this();")) {
+            if (t.startsWith("super(") || t.startsWith("this(")) {
                 callIndex = i;
                 break;
             }
@@ -462,6 +462,21 @@ public final class MethodEmitter {
         declarations.add(type + " " + name + " = " + init + ";");
     }
 
+    /**
+     * Declares a temporary at the current position instead of at the method top.
+     *
+     * <p>Temporaries created inside a constructor prologue cannot be declared with
+     * the other locals: those come after {@code super(...)}, while the temporary is
+     * used before it. Emitting the declaration where it is first needed keeps the
+     * mandatory-call-first rule intact.</p>
+     */
+    private void declareInline(String name, String type, String init) {
+        if (!declared.add(name)) {
+            return;
+        }
+        out.line(type + " " + name + " = " + init + ";");
+    }
+
     // ------------------------------------------------------------ dispatch mode
 
     private void emitDispatch(int loopStart) {
@@ -605,12 +620,27 @@ public final class MethodEmitter {
                 out.outdent();
                 out.line("}");
             }
-            out.line("s0 = __ex;");
+            out.line("s0 = " + exceptionAssignment(st) + ";");
             out.line(PC + " = " + h.handlerPc + ";");
             out.line("continue;");
             out.outdent();
             out.line("}");
         }
+    }
+
+    /**
+     * Assignment of the caught exception to the stack slot.
+     *
+     * <p>The catch clause always declares {@code java.lang.Throwable __ex} and then
+     * re-checks the type from the exception table, so the variable may have a
+     * narrower type and needs a cast.</p>
+     */
+    private String exceptionAssignment(SlotType slotType) {
+        String declared = javaType(slotType);
+        if ("java.lang.Throwable".equals(declared) || "java.lang.Object".equals(declared)) {
+            return "__ex";
+        }
+        return "(" + declared + ")(__ex)";
     }
 
     private List<ClassFile.Handler> handlersFor(int start, int end) {
@@ -731,8 +761,12 @@ public final class MethodEmitter {
                 continue;
             }
             String nm = "__p" + (tempSeq++);
-            declare(nm, javaType(v.type), v.type.defaultLiteral());
-            out.line(nm + " = " + v.code + ";");
+            if (prologueMode) {
+                declareInline(nm, javaType(v.type), v.code);
+            } else {
+                declare(nm, javaType(v.type), v.type.defaultLiteral());
+                out.line(nm + " = " + v.code + ";");
+            }
             stack.set(i, new Val(nm, v.type, v.sem, null));
         }
     }
@@ -742,8 +776,12 @@ public final class MethodEmitter {
             return v;
         }
         String nm = "__a" + (tempSeq++);
-        declare(nm, javaType(v.type), v.type.defaultLiteral());
-        out.line(nm + " = " + v.code + ";");
+        if (prologueMode) {
+            declareInline(nm, javaType(v.type), v.code);
+        } else {
+            declare(nm, javaType(v.type), v.type.defaultLiteral());
+            out.line(nm + " = " + v.code + ";");
+        }
         return new Val(nm, v.type, v.freshNew);
     }
 
@@ -799,7 +837,9 @@ public final class MethodEmitter {
             // The expression has been evaluated once; from now on the variable
             // holds it. Keeping the expression would re-evaluate it on the next
             // spill, which duplicates side effects such as append().
-            stack.set(i, new Val("s" + i, decl, decl, null));
+            // freshNew survives the spill: the object is still uninitialised and
+            // the pending <init> call must still turn into `s = new X(...)`.
+            stack.set(i, new Val("s" + i, decl, decl, v.freshNew));
         }
     }
 
@@ -1085,7 +1125,7 @@ public final class MethodEmitter {
             case O.IASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "int[]") + "[" + coerce(index, SlotType.INT_T) + "] = "
                         + coerce(value, SlotType.INT_T) + ";");
                 return false;
@@ -1093,7 +1133,7 @@ public final class MethodEmitter {
             case O.LASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "long[]") + "[" + coerce(index, SlotType.INT_T) + "] = "
                         + coerce(value, SlotType.LONG_T) + ";");
                 return false;
@@ -1101,7 +1141,7 @@ public final class MethodEmitter {
             case O.FASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "float[]") + "[" + coerce(index, SlotType.INT_T) + "] = "
                         + coerce(value, SlotType.FLOAT_T) + ";");
                 return false;
@@ -1109,7 +1149,7 @@ public final class MethodEmitter {
             case O.DASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "double[]") + "[" + coerce(index, SlotType.INT_T) + "] = "
                         + coerce(value, SlotType.DOUBLE_T) + ";");
                 return false;
@@ -1131,7 +1171,7 @@ public final class MethodEmitter {
             case O.CASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "char[]") + "[" + coerce(index, SlotType.INT_T) + "] = (char)("
                         + coerce(value, SlotType.INT_T) + ");");
                 return false;
@@ -1139,7 +1179,7 @@ public final class MethodEmitter {
             case O.SASTORE: {
                 Val value = pop();
                 Val index = pop();
-                Val arr = pop();
+                Val arr = materialize(pop());
                 out.line(arrayExpr(arr, "short[]") + "[" + coerce(index, SlotType.INT_T) + "] = (short)("
                         + coerce(value, SlotType.INT_T) + ");");
                 return false;
@@ -1483,7 +1523,12 @@ public final class MethodEmitter {
             case O.NEW: {
                 String owner = cp.className(ins.operand(0));
                 String nm = "__n" + (tempSeq++);
-                declarations.add(types.refInternal(owner) + " " + nm + " = null;");
+                if (prologueMode) {
+                    declareInline(nm, types.refInternal(owner), "null");
+                } else {
+                    declarations.add(types.refInternal(owner) + " " + nm + " = null;");
+                    declared.add(nm);
+                }
                 push(new Val(nm, SlotType.ref(owner), owner));
                 return false;
             }
@@ -1584,6 +1629,14 @@ public final class MethodEmitter {
         Val fresh = freshLocals.get(slot);
         if (fresh != null) {
             push(fresh);
+            return false;
+        }
+        // Before the mandatory super(...)/this(...) call, slot 0 of a constructor
+        // is the uninitialised instance. Java only allows it as the receiver of
+        // that call, which is exactly how it is used here; naming it after a
+        // local variable would produce a call to a method that does not exist.
+        if (prologueMode && slot == 0 && kind == K_REF && thisIsSlotZero) {
+            push(new Val("this", SlotType.ref(cf.name()), null));
             return false;
         }
         SlotType precise = frameLocal(slot, kind);
@@ -2245,8 +2298,22 @@ public final class MethodEmitter {
                 } else if ("this".equals(recv.code)) {
                     call.append("super(");
                 } else {
-                    call.append(cast(recv, owner)).append('.').append(names.method(owner, name, desc))
-                            .append('(');
+                    // Valid bytecode can only reach <init> on an object that is
+                    // still uninitialised. The freshNew marker is lost when the
+                    // reference crosses a basic block, so the call is rebuilt as
+                    // an assignment: `v = new Owner(args)`.
+                    String expr = "new " + types.refInternal(owner) + "(";
+                    StringBuilder inner = new StringBuilder(expr);
+                    appendArgs(inner, argCodes);
+                    inner.append(')');
+                    out.line(recv.code + " = " + inner + ";");
+                    for (int i = 0; i < stack.size(); i++) {
+                        Val v = stack.get(i);
+                        if (v.code.equals(recv.code)) {
+                            stack.set(i, new Val(v.code, SlotType.ref(owner), null));
+                        }
+                    }
+                    return false;
                 }
             } else if (ins.op == O.INVOKESPECIAL && "this".equals(recv.code)
                     && owner.equals(cf.superName())) {
@@ -2344,7 +2411,10 @@ public final class MethodEmitter {
      * type, a cast is inserted. If even the analysis lost the type, the array
      * kind implied by the opcode is used as a last resort.
      */
-    private String arrayExpr(Val arr, String fallbackArrayType) {
+    private String arrayExpr(Val arrRaw, String fallbackArrayType) {
+        // A compound receiver (`new int[2]`, `a.b()`) must be evaluated once into a
+        // temporary: `new int[2][0] = 7` is not a statement.
+        Val arr = materialize(arrRaw);
         boolean staticallyArray = arr.type.kind == SlotType.REF
                 && arr.type.desc != null && arr.type.desc.startsWith("[");
         if (staticallyArray) {

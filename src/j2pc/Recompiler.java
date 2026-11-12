@@ -58,6 +58,12 @@ public final class Recompiler {
                     }
                     try {
                         ClassFile cf = ClassReader.read(bytes);
+                        if (providedByRuntime(cf.name())) {
+                            // The emulation layer already ships this class.
+                            Log.debug("using the runtime version of %s", cf.name());
+                            result.runtimeProvided++;
+                            continue;
+                        }
                         classes.put(cf.name(), cf);
                     } catch (IOException e) {
                         Log.warn("cannot read %s: %s", entry, e.getMessage());
@@ -103,7 +109,7 @@ public final class Recompiler {
             Files.createDirectories(dir);
             Path file = dir.resolve(types.simpleName(internal) + ".java");
             try {
-                String src = new ClassEmitter(cf, opts, registry, types).emit();
+                String src = new ClassEmitter(cf, opts, registry, types, classes).emit();
                 Files.write(file, src.getBytes(StandardCharsets.UTF_8));
                 Stat st = Stat.of(cf);
                 stats.add(st);
@@ -134,35 +140,116 @@ public final class Recompiler {
     }
 
     /**
-     * Decides which classes have to be moved into a synthetic package.
+     * Decides which classes have to be renamed or moved in the output.
      *
-     * <p>Java source cannot mix the two worlds: a class in package {@code p} may
-     * not refer to a class in the unnamed package. As soon as a suite contains
-     * both kinds — a packaged MIDlet next to obfuscated helper classes — the
-     * default-package classes are relocated so the output can compile.</p>
+     * <p>Two Java rules force changes that the JVM does not have:</p>
+     *
+     * <ul>
+     *   <li>a class in a named package may not refer to a class in the unnamed
+     *       package, so in a mixed suite the default-package classes move into a
+     *       synthetic package;</li>
+     *   <li>a package segment and a class may not collide. With a package
+     *       {@code sk.inlogic.a} that also contains a class {@code a}, the name
+     *       {@code sk.inlogic.a.h} resolves {@code sk.inlogic.a} to the
+     *       <em>class</em>, not the package, and the reference fails. Such classes
+     *       are renamed with a trailing underscore.</li>
+     * </ul>
      */
     private static TypeMapper buildTypeMapper(java.util.Collection<String> classNames) {
         TypeMapper mapper = new TypeMapper();
+        java.util.Set<String> names = new java.util.LinkedHashSet<>(classNames);
+
         boolean hasPackaged = false;
         boolean hasDefault = false;
-        for (String name : classNames) {
+        for (String name : names) {
             if (Names.packageName(name).isEmpty()) {
                 hasDefault = true;
             } else {
                 hasPackaged = true;
             }
         }
-        if (!hasPackaged || !hasDefault) {
-            return mapper;
+        if (hasPackaged && hasDefault) {
+            int moved = 0;
+            for (String name : names) {
+                if (Names.packageName(name).isEmpty()) {
+                    mapper.rename(name, TypeMapper.UNPACKAGED + "/" + Names.simpleName(name));
+                    moved++;
+                }
+            }
+            Log.info("moving %d default-package classes into %s", moved, TypeMapper.UNPACKAGED);
         }
-        for (String name : classNames) {
-            if (Names.packageName(name).isEmpty()) {
-                mapper.rename(name, TypeMapper.UNPACKAGED + "/" + Names.simpleName(name));
+
+        // Resolve package/class name collisions. A class `p.X` clashes when `p.X`
+        // is also a package (so `p.X.Y` resolves to a nested class, not a class in
+        // that package). Renaming one can expose another, so iterate until stable.
+        for (int pass = 0; pass < 8; pass++) {
+            java.util.Set<String> packages = new java.util.HashSet<>();
+            for (String name : names) {
+                String mapped = mapper.internal(name);
+                String pkg = Names.packageName(mapped);
+                while (!pkg.isEmpty()) {
+                    packages.add(pkg);
+                    int dot = pkg.lastIndexOf('.');
+                    pkg = dot < 0 ? "" : pkg.substring(0, dot);
+                }
+            }
+
+            boolean changed = false;
+            java.util.Set<String> taken = new java.util.HashSet<>();
+            for (String name : names) {
+                taken.add(mapper.internal(name));
+            }
+            for (String name : names) {
+                String mapped = mapper.internal(name);
+                String pkg = Names.packageName(mapped);
+                String simple = Names.simpleName(mapped);
+                String qualified = pkg.isEmpty() ? simple : pkg + "." + simple;
+                if (!packages.contains(qualified)) {
+                    continue;
+                }
+                String candidate = (pkg.isEmpty() ? "" : pkg + "/") + simple + "_";
+                while (taken.contains(candidate)) {
+                    candidate = candidate + "_";
+                }
+                mapper.rename(name, candidate);
+                taken.add(candidate);
+                changed = true;
+                Log.debug("renaming %s to %s (class name collides with a package)", name, candidate);
+            }
+            if (!changed) {
+                break;
             }
         }
-        Log.info("moving %d default-package classes into %s",
-                mapper.renamedCount(), TypeMapper.UNPACKAGED);
         return mapper;
+    }
+
+    /**
+     * Packages owned by the emulation layer.
+     *
+     * <p>Suites frequently bundle their own copies of platform classes — a stub
+     * {@code com.nokia.mid.ui.DirectGraphics}, a {@code javax.microedition} shim.
+     * Recompiling those would emit a second definition that shadows the runtime
+     * version and is usually incomplete, so they are skipped: the runtime is the
+     * authority for its own packages.</p>
+     */
+    private static final String[] RUNTIME_PACKAGES = {
+            "javax/microedition/",
+            "com/nokia/",
+            "com/siemens/",
+            "com/motorola/",
+            "com/samsung/",
+            "com/mascotcapsule/",
+            "javax/bluetooth/",
+            "javax/wireless/",
+    };
+
+    private static boolean providedByRuntime(String internalName) {
+        for (String pkg : RUNTIME_PACKAGES) {
+            if (internalName.startsWith(pkg)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Path writeLauncher(Path outRoot, JadFile jad, Map<String, ClassFile> classes,
@@ -267,6 +354,8 @@ public final class Recompiler {
         public int failedClasses;
         public int lines;
         public int jarEntryCount;
+        /** Classes skipped because the emulation layer already provides them. */
+        public int runtimeProvided;
         public Path launcher;
     }
 

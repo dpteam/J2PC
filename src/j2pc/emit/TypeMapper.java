@@ -75,20 +75,31 @@ public final class TypeMapper {
         String internal = typeDesc.substring(1, typeDesc.length() - 1);
         return refInternal(internal);
     }
-    /** Source-level type for an internal name ({@code a/b/C}, {@code [I} or {@code I}). */
+    /**
+     * Source-level type for an internal name ({@code a/b/C}, {@code [I} or {@code java/lang/String}).
+     *
+     * <p>An internal name is never a primitive descriptor, so a single-letter class
+     * name such as {@code B} or {@code I} must be treated as a class. Obfuscators
+     * name classes exactly like that, and mistaking {@code B} for {@code byte}
+     * produces code that does not compile.</p>
+     */
     public String refInternal(String internalName) {
         if (internalName == null) {
             return "java.lang.Object";
         }
         if (internalName.startsWith("[")) {
-            // Map the component, so an array of a relocated class is renamed too.
-            return refInternal(internalName.substring(1)) + "[]";
-        }
-        if (internalName.length() == 1 && Descriptor.isPrimitive(internalName)) {
-            return Descriptor.javaType(internalName);
+            // An array descriptor: the component may be a primitive descriptor
+            // (`[I`), another array (`[[I`) or a class (`[Lfoo/Bar;`). Only inside
+            // an array is a single letter unambiguously a primitive.
+            String component = internalName.substring(1);
+            if (component.length() == 1 && Descriptor.isPrimitive(component)) {
+                return Descriptor.javaType(component) + "[]";
+            }
+            return refInternal(component) + "[]";
         }
         // Tolerate a full descriptor, which some call sites pass through.
-        if (internalName.startsWith("L") && internalName.endsWith(";")) {
+        if (internalName.length() > 1 && internalName.startsWith("L")
+                && internalName.endsWith(";")) {
             return refInternal(internalName.substring(1, internalName.length() - 1));
         }
         String mapped = internal(internalName);
