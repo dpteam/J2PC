@@ -47,7 +47,9 @@ public final class NameRegistry {
 
     /** Assigns the final Java names for every member of every class. */
     public void registerAll(java.util.Collection<ClassFile> all) {
+        Map<String, ClassFile> byName = new HashMap<>();
         for (ClassFile cf : all) {
+            byName.put(cf.name(), cf);
             typeNames.add(Names.simpleName(cf.name()));
             if (cf.superName() != null) {
                 superOf.put(cf.name(), cf.superName());
@@ -99,14 +101,32 @@ public final class NameRegistry {
         }
 
         for (ClassFile cf : all) {
-            register(cf);
+            registerWithAncestors(cf, byName, new HashSet<>());
         }
+    }
+
+    /** Registers {@code cf} after its superclass, so inherited fields are known. */
+    private void registerWithAncestors(ClassFile cf, Map<String, ClassFile> byName, Set<String> path) {
+        if (classes.containsKey(cf.name()) || !path.add(cf.name())) {
+            return;
+        }
+        String parent = cf.superName();
+        ClassFile parentFile = parent == null ? null : byName.get(parent);
+        if (parentFile != null) {
+            registerWithAncestors(parentFile, byName, path);
+        }
+        register(cf);
     }
 
     /** Assigns the final Java names for every member of {@code cf}. */
     public void register(ClassFile cf) {
         ClassNames names = new ClassNames();
         names.usedFields.addAll(typeNames);
+        // Field names must be unique across the whole hierarchy: bytecode tells
+        // `b:I` and `b:Ld;` apart, Java resolves `this.b` to the most derived
+        // declaration and would silently read the wrong field.
+        java.util.Set<String> inherited = inheritedFieldNames(cf);
+        names.usedFields.addAll(inherited);
         for (ClassFile.Member f : cf.fields) {
             if (f.name() == null || f.desc() == null) {
                 continue;
@@ -177,8 +197,23 @@ public final class NameRegistry {
         return resolved;
     }
 
-    private static String methodKey(ClassFile.Member m) {
-        boolean isStatic = (m.access & ClassFile.ACC_STATIC) != 0;
+    /** Field names already used anywhere in the superclass chain. */
+    private java.util.Set<String> inheritedFieldNames(ClassFile cf) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        String current = superOf.get(cf.name());
+        int guard = 0;
+        while (current != null && guard++ < 64) {
+            ClassNames names = classes.get(current);
+            if (names == null) {
+                break;
+            }
+            out.addAll(names.field.values());
+            current = superOf.get(current);
+        }
+        return out;
+    }
+
+    private static String methodKey(ClassFile.Member m) {        boolean isStatic = (m.access & ClassFile.ACC_STATIC) != 0;
         return m.name() + '\u0000' + paramSignature(m.desc()) + '\u0000'
                 + returnType(m.desc()) + '\u0000' + (isStatic ? "S" : "I");
     }
