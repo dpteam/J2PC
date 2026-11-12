@@ -1536,14 +1536,16 @@ public final class MethodEmitter {
                 Val count = pop();
                 String desc = arrayDesc(ins.operand(0));
                 String base = types.ref(desc.substring(1));
-                push(new Val("new " + base + "[" + count.code + "]", SlotType.ref(desc), null));
+                push(new Val("new " + base + "[" + coerce(count, SlotType.INT_T) + "]",
+                        SlotType.ref(desc), null));
                 return false;
             }
             case O.ANEWARRAY: {
                 Val count = pop();
                 String elem = cp.className(ins.operand(0));
                 String desc = elem.startsWith("[") ? "[" + elem : "[L" + elem + ";";
-                push(new Val(arrayCreation(elem, count.code), SlotType.ref(desc), null));
+                push(new Val(arrayCreation(elem, coerce(count, SlotType.INT_T)),
+                        SlotType.ref(desc), null));
                 return false;
             }
             case O.MULTIANEWARRAY: {
@@ -1560,7 +1562,7 @@ public final class MethodEmitter {
                 String base = types.ref(desc.substring(totalDims));
                 StringBuilder sb = new StringBuilder("new ").append(base);
                 for (int i = 0; i < dims; i++) {
-                    sb.append('[').append(sizes.get(i).code).append(']');
+                    sb.append('[').append(coerce(sizes.get(i), SlotType.INT_T)).append(']');
                 }
                 for (int i = dims; i < totalDims; i++) {
                     sb.append("[]");

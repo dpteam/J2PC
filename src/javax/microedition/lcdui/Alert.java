@@ -4,7 +4,15 @@ package javax.microedition.lcdui;
 public class Alert extends Screen {
 
     public static final int FOREVER = -2;
-    public static final int DISMISS_COMMAND = 0;
+
+    /**
+     * The implicit dismiss command.
+     *
+     * <p>MIDP 2.0 declares this as a {@link Command}, not an int: applications
+     * compare the command passed to {@code commandAction} against it.</p>
+     */
+    public static final Command DISMISS_COMMAND = new Command("", Command.OK, 0);
+
     public static final int ALERT_DEFAULT = 0;
     public static final int ALERT_INFO = 1;
     public static final int ALERT_WARNING = 2;
