@@ -30,6 +30,14 @@ The synthetic suite is the part of CI that actually proves the translator works.
 classes and against the recompiled ones, and diffs the output. Any behavioural difference fails
 the job.
 
+Two details of the harness are load-bearing, and both were learned the hard way:
+
+* **Class path order.** The test classes must come *before* the runtime JAR. An older build of
+  the JAR contained a copy of the synthetic classes, which silently shadowed both versions and
+  made the comparison compare the same stale code twice.
+* **Sanity checks on the result set.** A comparison of two empty outputs passes trivially, so the
+  script requires a minimum number of results and fails when a class could not be loaded.
+
 ### Corpus job
 
 Set the repository variable to enable it:
