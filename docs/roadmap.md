@@ -58,7 +58,12 @@ Each is a small adapter over the existing emulation layer.
 * **Fonts.** Ship a bitmap font that matches handset metrics, so layouts stop shifting.
 * **Audio.** Decode MIDI (via `javax.sound.midi`), WAV and AMR; route `Player` to it.
 * **Timing.** A frame clock that can be throttled to the original speed.
-* **Screens.** Render `Form`/`List` with proper focus, scrolling and soft keys.
+* **Screens.** Render `Form`/`List` with proper focus, scrolling and soft keys, including
+  tapping an item with the pointer.
+* **Key repeat.** Deliver `keyRepeated` from a timer so holding an arrow scrolls, as it does
+  on a handset.
+* **Touch for prebuilt screens.** `Canvas` already receives pointer events in its own
+  coordinates; `Form`, `List` and `Alert` still need per-item hit testing.
 
 ### 5. Verification
 
@@ -76,14 +81,15 @@ Each is a small adapter over the existing emulation layer.
 * `--diff` — show what changed between two recompilations,
 * `--stats json` — machine readable statistics,
 * caching so that unchanged classes are not re-emitted,
-* a `j2pc` wrapper script that recompiles, packages and runs in one step,
-* **run from the GUI** — the interface can recompile and package, but not launch yet.
+* a `j2pc` wrapper script that recompiles, packages and runs in one step.
 
 ## Done
 
 * **TUI** — `--tui`, line oriented, works in any terminal and over SSH.
-* **GUI** — `--gui`, local HTTP server plus a plain HTML/JS front end; opens in the system
-  browser next to a control window, and embeds in a JavaFX `WebView` when one is present.
+* **GUI** — `--gui`, local HTTP server plus a plain HTML/JS front end; recompiles,
+  packages and launches the result. See [packaging.md](packaging.md).
+* **Touch and key mapping** — pointer input in application coordinates, letterboxed
+  rendering, a documented key table and an in-window *Help → Controls* dialog.
 * **Packaging** — `--build` compiles and writes a self-contained JAR, `--exe` wraps it into a
   native launcher with `jpackage`. See [packaging.md](packaging.md).
 * **CI** — build, self test, verifier and corpus run, with artifacts and checksums.

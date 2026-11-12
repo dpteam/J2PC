@@ -257,7 +257,7 @@ public final class MethodEmitter {
      * Moves the mandatory {@code super(...)}/{@code this(...)} call to the front.
      *
      * <p>Java requires it to be the first statement, but the JVM allows work before
-     * it — inner classes assign their synthetic {@code this$0} field first, for
+     * it вЂ” inner classes assign their synthetic {@code this$0} field first, for
      * example. Moving the call is safe when nothing it uses is produced by the
      * preceding lines.</p>
      *
@@ -681,6 +681,11 @@ public final class MethodEmitter {
             localNow[i] = i < frame.locals.length ? frame.locals[i] : SlotType.UNSET_T;
         }
         stack.clear();
+        // The `new` alias map is per basic block: a temporary only stands for a
+        // local until the block ends. Carrying it further would alias an unrelated
+        // value that reused the slot — the analysis tracks types per program point,
+        // but a slot really can hold an int here and an object there.
+        freshLocals.clear();
         for (int i = 0; i < frame.sp; i++) {
             SlotType declaredType = analysis.stackDecl[i];
             declare("s" + i, javaType(declaredType), declaredType.defaultLiteral());
@@ -814,7 +819,12 @@ public final class MethodEmitter {
                 continue;
             }
             emitLineComment(ins.pc);
-            exec(ins);
+            // A terminated instruction ends the flow: whatever follows is
+            // unreachable, and emitting it would be a Java error. The deferred
+            // constructor stub is the case that matters, since it always throws.
+            if (exec(ins)) {
+                break;
+            }
         }
     }
 
@@ -832,30 +842,53 @@ public final class MethodEmitter {
         final boolean effect;
         /** Statement form of an effectful expression, when it differs from {@link #code}. */
         final String raw;
+        /**
+         * Java type of the expression when it is narrower than {@code int}:
+         * {@code "boolean"}, {@code "byte"}, {@code "short"} or {@code "char"}.
+         * The analysis tracks everything in int slots, but javac does not вЂ” and the
+         * difference decides which overload a call resolves to.
+         */
+        final String narrow;
 
         Val(String code, SlotType type, String freshNew) {
-            this(code, type, type, freshNew, false, null);
+            this(code, type, type, freshNew, false, null, null);
         }
 
         Val(String code, SlotType type, SlotType sem, String freshNew) {
-            this(code, type, sem, freshNew, false, null);
+            this(code, type, sem, freshNew, false, null, null);
         }
 
         Val(String code, SlotType type, SlotType sem, String freshNew, boolean effect) {
-            this(code, type, sem, freshNew, effect, null);
+            this(code, type, sem, freshNew, effect, null, null);
         }
 
         Val(String code, SlotType type, SlotType sem, String freshNew, boolean effect, String raw) {
+            this(code, type, sem, freshNew, effect, raw, null);
+        }
+
+        Val(String code, SlotType type, SlotType sem, String freshNew, boolean effect, String raw,
+            String narrow) {
             this.code = code;
             this.type = type;
             this.sem = sem == null ? type : sem;
             this.freshNew = freshNew;
             this.effect = effect;
             this.raw = raw;
+            this.narrow = narrow;
+        }
+
+        /** Copy with a different code expression, keeping the type information. */
+        Val withCode(String newCode) {
+            return new Val(newCode, type, sem, freshNew, effect, raw, narrow);
+        }
+
+        /** Copy marked as narrower than {@code int}. */
+        Val asNarrow(String javaType) {
+            return new Val(code, type, sem, freshNew, effect, raw, javaType);
         }
 
         Val withEffect() {
-            return new Val(code, type, sem, freshNew, true, raw);
+            return new Val(code, type, sem, freshNew, true, raw, narrow);
         }
     }
 
@@ -986,6 +1019,13 @@ public final class MethodEmitter {
             return c;
         }
         if (v.type.equals(target)) {
+            // The static type matches, but the *Java* type of the expression may
+            // still be narrower: `saload` and a `short`-returning method both land
+            // in an int slot, yet javac sees `short`. Passing that to an `int`
+            // parameter silently picks a different overload, so widen explicitly.
+            if (target.kind == SlotType.INT && v.narrow != null) {
+                return widen(v);
+            }
             return c;
         }
         // A slot whose uses disagree ends up as Object; box and unbox through
@@ -1109,23 +1149,45 @@ public final class MethodEmitter {
         return "((" + targetType + ")(" + code + "))";
     }
 
+    /**
+     * Widens an expression whose Java type is narrower than {@code int}.
+     *
+     * <p>Needed wherever an overload must be picked exactly as the bytecode picked
+     * it: {@code a(byte, short, short)} and {@code a(byte, int, int)} are both
+     * applicable to {@code (byte, short, short)} arguments, and javac takes the
+     * first. A boolean is not an int at all, so it becomes {@code x ? 1 : 0}.</p>
+     */
+    private static String widen(Val v) {
+        if ("boolean".equals(v.narrow)) {
+            return "((" + v.code + ") ? 1 : 0)";
+        }
+        return "(int)(" + v.code + ")";
+    }
+
     /** Converts a value to a value of the given JVM descriptor, honouring Z/B/C/S. */
-    private String coerceTo(String code, SlotType actual, String desc) {
+    private String coerceTo(Val v, String desc) {
+        String code = v.code;
         char d = desc.charAt(0);
         switch (d) {
             case 'Z':
-                if (actual.kind == SlotType.REF || actual.kind == SlotType.CONFLICT) {
+                if ("boolean".equals(v.narrow)) {
+                    // Already a boolean expression; `x != 0` would not compile.
+                    return code;
+                }
+                if (v.type.kind == SlotType.REF || v.type.kind == SlotType.CONFLICT) {
                     return "j2pc.rt.Box.toInt(" + code + ") != 0";
                 }
                 return "(" + code + ") != 0";
             case 'B':
-                return "(byte)(" + coerce(new Val(code, actual, null), SlotType.INT_T) + ")";
+                return "(byte)(" + coerce(new Val(code, v.type, null), SlotType.INT_T) + ")";
             case 'C':
-                return "(char)(" + coerce(new Val(code, actual, null), SlotType.INT_T) + ")";
+                return "(char)(" + coerce(new Val(code, v.type, null), SlotType.INT_T) + ")";
             case 'S':
-                return "(short)(" + coerce(new Val(code, actual, null), SlotType.INT_T) + ")";
+                return "(short)(" + coerce(new Val(code, v.type, null), SlotType.INT_T) + ")";
             default:
-                return coerce(new Val(code, actual, null), SlotType.ofDescriptor(desc));
+                // Passing the value itself, not just its code, keeps the "narrower
+                // than int" marker: it decides which overload javac picks.
+                return coerce(v, SlotType.ofDescriptor(desc));
         }
     }
 
@@ -1138,7 +1200,30 @@ public final class MethodEmitter {
             v = new Val(code, SlotType.ofDescriptor(desc), null);
         }
         // `code` is the raw call: usable as a statement if the value is dropped.
-        return new Val(v.code, v.type, v.sem, v.freshNew, true, code);
+        // The Java type of a call returning byte, char or short is that narrow type
+        // even though it occupies an int slot, and overload resolution notices.
+        String narrow = narrowOf(desc);
+        return new Val(v.code, v.type, v.sem, v.freshNew, true, code, narrow);
+    }
+
+    /** Java type narrower than {@code int} for a field or return descriptor. */
+    private static String narrowOf(String desc) {
+        if (desc == null || desc.isEmpty()) {
+            return null;
+        }
+        String d = desc;
+        while (d.startsWith("[")) {
+            d = d.substring(1);
+        }
+        if (d.isEmpty()) {
+            return null;
+        }
+        switch (d.charAt(0)) {
+            case 'B': return "byte";
+            case 'C': return "char";
+            case 'S': return "short";
+            default: return null;
+        }
     }
 
     // ------------------------------------------------------------- instruction
@@ -1251,8 +1336,12 @@ public final class MethodEmitter {
                     push(new Val("(" + arrayExpr(arr, "boolean[]") + "["
                             + coerce(index, SlotType.INT_T) + "] ? 1 : 0)", SlotType.INT_T, null));
                 } else {
+                    // The element type follows the array: a `short[]` load has Java
+                    // type short, and passing it to an `int` parameter must not
+                    // silently select a `short` overload.
+                    String narrow = narrowOf(desc == null ? "" : desc);
                     push(new Val(arrayExpr(arr, "byte[]") + "[" + coerce(index, SlotType.INT_T) + "]",
-                            SlotType.INT_T, null));
+                            SlotType.INT_T, null, null, false, null, narrow));
                 }
                 return false;
             }
@@ -1601,7 +1690,7 @@ public final class MethodEmitter {
             case O.IRETURN: case O.LRETURN: case O.FRETURN: case O.DRETURN: case O.ARETURN: {
                 Val v = pop();
                 String ret = Descriptor.returnType(method.desc());
-                out.line("return " + coerceTo(v.code, v.type, ret) + ";");
+                out.line("return " + coerceTo(v, ret) + ";");
                 return true;
             }
             case O.RETURN:
@@ -1629,7 +1718,8 @@ public final class MethodEmitter {
                 if (desc.charAt(0) == 'Z') {
                     push(new Val("(" + access + " ? 1 : 0)", SlotType.INT_T, null));
                 } else {
-                    push(new Val(access, SlotType.ofDescriptor(desc), null));
+                    push(new Val(access, SlotType.ofDescriptor(desc), null, null, false, null,
+                            narrowOf(desc)));
                 }
                 return false;
             }
@@ -1641,7 +1731,7 @@ public final class MethodEmitter {
                 Val v = pop();
                 preservePending(fname);
                 out.line(types.refInternal(owner) + "." + fname + " = "
-                        + coerceTo(v.code, v.type, desc) + ";");
+                        + coerceTo(v, desc) + ";");
                 return false;
             }
             case O.GETFIELD: {
@@ -1649,11 +1739,13 @@ public final class MethodEmitter {
                 String owner = cp.refOwner(idx);
                 String desc = cp.refType(idx);
                 Val recv = pop();
-                String access = cast(recv, owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx));
+                String fname = names.field(owner, cp.refName(idx), cp.refType(idx));
+                String access = fieldReceiver(recv, owner, fname) + "." + fname;
                 if (desc.charAt(0) == 'Z') {
                     push(new Val("(" + access + " ? 1 : 0)", SlotType.INT_T, null));
                 } else {
-                    push(new Val(access, SlotType.ofDescriptor(desc), null));
+                    push(new Val(access, SlotType.ofDescriptor(desc), null, null, false, null,
+                            narrowOf(desc)));
                 }
                 return false;
             }
@@ -1665,8 +1757,8 @@ public final class MethodEmitter {
                 Val v = pop();
                 Val recv = pop();
                 preservePending(fname);
-                out.line(cast(recv, owner) + "." + fname + " = "
-                        + coerceTo(v.code, v.type, desc) + ";");
+                out.line(fieldReceiver(recv, owner, fname) + "." + fname + " = "
+                        + coerceTo(v, desc) + ";");
                 return false;
             }
 
@@ -1811,7 +1903,7 @@ public final class MethodEmitter {
             push(buffered);
             return false;
         }
-        Val fresh = freshLocals.get(slot);
+        Val fresh = kind == K_REF ? freshLocals.get(slot) : null;
         if (fresh != null) {
             push(fresh);
             return false;
@@ -1904,8 +1996,7 @@ public final class MethodEmitter {
         SlotType precise = storeType(slot, kind, v);
         if (localNow != null && slot < localNow.length) {
             localNow[slot] = precise;
-        }
-        declareLocal(slot, kind, precise);
+        }        declareLocal(slot, kind, precise);
         SlotType t = localType(slot, kind, precise);
         String nm = localName(slot, kind, precise);
         if (kind == K_INT && "Z".equals(argDesc(slot)) && nm.equals(argNameForSlot(slot))) {
@@ -2145,9 +2236,9 @@ public final class MethodEmitter {
      * plain Java:</p>
      *
      * <ul>
-     *   <li>{@code StringConcatFactory} — compiled string concatenation, emitted as
+     *   <li>{@code StringConcatFactory} вЂ” compiled string concatenation, emitted as
      *       {@code a + b + c} using the recipe carried in the bootstrap arguments;</li>
-     *   <li>{@code LambdaMetafactory} — a lambda, emitted as an anonymous class
+     *   <li>{@code LambdaMetafactory} вЂ” a lambda, emitted as an anonymous class
      *       implementing the functional interface.</li>
      * </ul>
      *
@@ -2434,7 +2525,7 @@ public final class MethodEmitter {
         List<String> argCodes = new ArrayList<>();
         for (int i = args.length - 1; i >= 0; i--) {
             Val v = pop();
-            argCodes.add(0, coerceTo(v.code, v.type, args[i]));
+            argCodes.add(0, coerceTo(v, args[i]));
         }
 
         // Resources of a recompiled suite are files, not JAR entries, so the
@@ -2567,6 +2658,22 @@ public final class MethodEmitter {
         return "((" + want + ")(" + recv.code + "))";
     }
 
+    /**
+     * Receiver expression for a field access.
+     *
+     * <p>When a class inherits the same field name from a superclass and from an
+     * interface, {@code this.name} is ambiguous in Java even though the bytecode
+     * named exactly one owner. Casting the receiver to that owner disambiguates.
+     * The cast is applied only in that case: a cast on {@code this} would hide
+     * inherited protected members of platform classes.</p>
+     */
+    private String fieldReceiver(Val recv, String owner, String fieldName) {
+        if ("this".equals(recv.code) && names.ambiguousField(cf.name(), fieldName)) {
+            return "((" + types.refInternal(owner) + ")(this))";
+        }
+        return cast(recv, owner);
+    }
+
     private String typeRef(String internalName) {
         if (internalName == null) {
             return "java.lang.Object";
@@ -2659,7 +2766,7 @@ public final class MethodEmitter {
      * <p>The two opcodes pass different things: {@code anewarray} carries a
      * <em>class name</em>, {@code multianewarray} carries a <em>descriptor</em>.
      * That matters because obfuscators name classes after primitive descriptor
-     * letters — a class called {@code J} is an interface, not {@code long}. Only a
+     * letters вЂ” a class called {@code J} is an interface, not {@code long}. Only a
      * component that starts with {@code [} is read as a descriptor; a bare name is
      * always a class.</p>
      */

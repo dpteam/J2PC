@@ -186,6 +186,15 @@ public final class Display {
         private final BufferedImage buffer;
         private Displayable target;
 
+        /** Scale and offset of the last paint, used to map pointer coordinates. */
+        private double scaleX = 1;
+        private double scaleY = 1;
+        private int offsetX;
+        private int offsetY;
+
+        /** True while a button is held, so a drag outside the screen still tracks. */
+        private boolean dragging;
+
         CanvasPanel() {
             setPreferredSize(new Dimension(240, 320));
             setBackground(java.awt.Color.BLACK);
@@ -211,15 +220,18 @@ public final class Display {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent e) {
-                    if (target instanceof Canvas) {
-                        ((Canvas) target).pointerEvent(e.getX(), e.getY(), 0);
+                    requestFocusInWindow();
+                    dragging = true;
+                    if (target != null) {
+                        target.pointerEvent(bufferX(e), bufferY(e), 0);
                     }
                 }
 
                 @Override
                 public void mouseReleased(MouseEvent e) {
-                    if (target instanceof Canvas) {
-                        ((Canvas) target).pointerEvent(e.getX(), e.getY(), 1);
+                    dragging = false;
+                    if (target != null) {
+                        target.pointerEvent(bufferX(e), bufferY(e), 1);
                     }
                 }
             });
@@ -227,11 +239,30 @@ public final class Display {
             addMouseMotionListener(new MouseAdapter() {
                 @Override
                 public void mouseDragged(MouseEvent e) {
-                    if (target instanceof Canvas) {
-                        ((Canvas) target).pointerEvent(e.getX(), e.getY(), 2);
+                    if (dragging && target != null) {
+                        target.pointerEvent(bufferX(e), bufferY(e), 2);
                     }
                 }
             });
+        }
+
+        /**
+         * Pointer x in the application's own coordinate system.
+         *
+         * <p>The window can be any size, while the MIDlet thinks in a fixed
+         * 240x320 surface, so a raw mouse coordinate would be wrong for every tap
+         * as soon as the window is resized. The inverse of the paint transform maps
+         * it back; coordinates outside the surface are clamped to the edge, which is
+         * what a real touchscreen reports when a finger leaves the panel.</p>
+         */
+        private int bufferX(MouseEvent e) {
+            int x = (int) Math.round((e.getX() - offsetX) / scaleX);
+            return Math.max(0, Math.min(buffer.getWidth() - 1, x));
+        }
+
+        private int bufferY(MouseEvent e) {
+            int y = (int) Math.round((e.getY() - offsetY) / scaleY);
+            return Math.max(0, Math.min(buffer.getHeight() - 1, y));
         }
 
         void bind(Displayable d) {
@@ -262,7 +293,26 @@ public final class Display {
                 target.paintInternal(mg);
             }
             g2.dispose();
-            g.drawImage(buffer, 0, 0, getWidth(), getHeight(), null);
+
+            // Keep the aspect ratio: stretching the surface would distort the game
+            // and, worse, make every touch land a few pixels off. The letterbox is
+            // painted black, so it looks like a handset frame rather than a bug.
+            double sx = getWidth() / (double) buffer.getWidth();
+            double sy = getHeight() / (double) buffer.getHeight();
+            double scale = Math.min(sx, sy);
+            int w = (int) Math.round(buffer.getWidth() * scale);
+            int h = (int) Math.round(buffer.getHeight() * scale);
+            int ox = (getWidth() - w) / 2;
+            int oy = (getHeight() - h) / 2;
+
+            scaleX = w / (double) buffer.getWidth();
+            scaleY = h / (double) buffer.getHeight();
+            offsetX = ox;
+            offsetY = oy;
+
+            g.setColor(java.awt.Color.BLACK);
+            g.fillRect(0, 0, getWidth(), getHeight());
+            g.drawImage(buffer, ox, oy, w, h, null);
         }
     }
 }

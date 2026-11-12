@@ -44,10 +44,11 @@ public final class NameRegistry {
     private final Map<String, String> methodNames = new HashMap<>();
     private final Map<String, String> superOf = new HashMap<>();
     private final Set<String> typeNames = new HashSet<>();
+    /** Every class of the archive, by internal name; used to walk hierarchies. */
+    private final Map<String, ClassFile> byName = new HashMap<>();
 
     /** Assigns the final Java names for every member of every class. */
     public void registerAll(java.util.Collection<ClassFile> all) {
-        Map<String, ClassFile> byName = new HashMap<>();
         for (ClassFile cf : all) {
             byName.put(cf.name(), cf);
             typeNames.add(Names.simpleName(cf.name()));
@@ -101,19 +102,19 @@ public final class NameRegistry {
         }
 
         for (ClassFile cf : all) {
-            registerWithAncestors(cf, byName, new HashSet<>());
+            registerWithAncestors(cf, new HashSet<>());
         }
     }
 
     /** Registers {@code cf} after its superclass and interfaces. */
-    private void registerWithAncestors(ClassFile cf, Map<String, ClassFile> byName, Set<String> path) {
+    private void registerWithAncestors(ClassFile cf, Set<String> path) {
         if (classes.containsKey(cf.name()) || !path.add(cf.name())) {
             return;
         }
         String parent = cf.superName();
         ClassFile parentFile = parent == null ? null : byName.get(parent);
         if (parentFile != null) {
-            registerWithAncestors(parentFile, byName, path);
+            registerWithAncestors(parentFile, path);
         }
         // Interfaces must be registered first for the same reason as superclasses:
         // an implementing class has to see the name the interface chose for the
@@ -121,7 +122,7 @@ public final class NameRegistry {
         for (String itf : cf.interfaceNames()) {
             ClassFile itfFile = byName.get(itf);
             if (itfFile != null) {
-                registerWithAncestors(itfFile, byName, path);
+                registerWithAncestors(itfFile, path);
             }
         }
         register(cf);
@@ -284,7 +285,13 @@ public final class NameRegistry {
         return null;
     }
 
-    /** Field names already used anywhere in the superclass chain. */
+    /**
+     * Field names visible through the superclass chain and the interfaces.
+     *
+     * <p>Both matter: an interface field is inherited just like a superclass
+     * field, and a class that declares its own field with the same name shadows
+     * two unrelated ones — which Java reports as an ambiguous reference.</p>
+     */
     private java.util.Set<String> inheritedFieldNames(ClassFile cf) {
         java.util.Set<String> out = new java.util.HashSet<>();
         String current = superOf.get(cf.name());
@@ -297,7 +304,70 @@ public final class NameRegistry {
             out.addAll(names.field.values());
             current = superOf.get(current);
         }
+        collectInterfaceFieldNames(cf, out, 0);
         return out;
+    }
+
+    /** Adds the field names of every implemented interface, recursively. */
+    private void collectInterfaceFieldNames(ClassFile cf, java.util.Set<String> out, int depth) {
+        if (cf == null || depth > 16) {
+            return;
+        }
+        for (String itf : cf.interfaceNames()) {
+            ClassNames names = classes.get(itf);
+            if (names != null) {
+                out.addAll(names.field.values());
+            }
+            ClassFile itfFile = byName.get(itf);
+            if (itfFile != null) {
+                collectInterfaceFieldNames(itfFile, out, depth + 1);
+            }
+        }
+        String parent = cf.superName();
+        ClassFile parentFile = parent == null ? null : byName.get(parent);
+        if (parentFile != null) {
+            collectInterfaceFieldNames(parentFile, out, depth + 1);
+        }
+    }
+
+    /**
+     * Field names that a class inherits from both a superclass and an interface.
+     *
+     * <p>Java resolves {@code this.x} by name, and when two unrelated ancestors
+     * contribute an {@code x} the reference is ambiguous — even though the bytecode
+     * said exactly which one it meant. The emitter asks this to qualify the
+     * receiver with a cast in that case.</p>
+     */
+    public boolean ambiguousField(String className, String fieldName) {
+        ClassNames names = classes.get(className);
+        if (names == null) {
+            return false;
+        }
+        if (names.ambiguousFields == null) {
+            ClassFile cf = byName.get(className);
+            names.ambiguousFields = cf == null
+                    ? java.util.Set.of()
+                    : computeAmbiguousFields(cf);
+        }
+        return names.ambiguousFields.contains(fieldName);
+    }
+
+    private java.util.Set<String> computeAmbiguousFields(ClassFile cf) {
+        java.util.Set<String> fromSuper = new java.util.HashSet<>();
+        String current = superOf.get(cf.name());
+        int guard = 0;
+        while (current != null && guard++ < 64) {
+            ClassNames names = classes.get(current);
+            if (names == null) {
+                break;
+            }
+            fromSuper.addAll(names.field.values());
+            current = superOf.get(current);
+        }
+        java.util.Set<String> fromInterfaces = new java.util.HashSet<>();
+        collectInterfaceFieldNames(cf, fromInterfaces, 0);
+        fromSuper.retainAll(fromInterfaces);
+        return fromSuper;
     }
 
     private static String methodKey(ClassFile.Member m) {        boolean isStatic = (m.access & ClassFile.ACC_STATIC) != 0;
@@ -419,6 +489,8 @@ public final class NameRegistry {
          * platform method such as {@code InputStream.read()}.
          */
         final Set<String> usedMethods = new HashSet<>();
+        /** Field names inherited from both a superclass and an interface. */
+        Set<String> ambiguousFields;
 
         String uniqueField(String raw) {
             String base = Names.identifier(raw);

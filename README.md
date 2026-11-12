@@ -211,6 +211,50 @@ Both interactive front ends give every application its own output folder
 (`out/Tetris/`, `out/2048/`): suites routinely ship a class with the same name,
 and one directory per application keeps them from overwriting each other.
 
+## Controls
+
+A recompiled MIDlet opens in a plain window and is driven by the keyboard and the
+mouse. Every key the application asks for is available; nothing is reserved by the
+host except the menu bar.
+
+| Input | MIDP meaning |
+|-------|--------------|
+| Arrows, `W` `A` `S` `D` | `UP`, `LEFT`, `DOWN`, `RIGHT` |
+| `Enter`, `Space`, numpad `5` | `FIRE` / select |
+| `Q` or `F1` | `GAME_A` |
+| `E` or `F2` | `GAME_B` |
+| `R` or `F3` | `GAME_C` |
+| `T` or `F4` | `GAME_D` |
+| `0`–`9`, numpad `0`–`9` | `KEY_NUM0` … `KEY_NUM9` |
+| `*`, `#` | `KEY_STAR`, `KEY_POUND` |
+| Mouse click and drag | `pointerPressed` / `pointerDragged` / `pointerReleased` |
+| `Ctrl+Q`, menu *Application → Quit* | quit |
+| `F12`, menu *Help → Controls* | the same list, in the window |
+
+Not every application listens to everything: a game that only reads the numeric
+keypad ignores the arrows, and one written for a touch handset ignores the
+keyboard. That is the application's choice, not a limitation of the host.
+
+### Touch
+
+Pointer input is reported in the application's own coordinate system. The window
+keeps the original aspect ratio and letterboxes the rest, so a resized or
+maximised window still taps the pixel the game drew — coordinates are mapped
+through the same transform used for painting, then clamped to the screen edges.
+
+`Canvas.hasPointerEvents()` and `hasPointerMotionEvents()` return `true`, which is
+what makes touch-aware MIDlets enable their own pointer handling. Prebuilt screens
+(`Form`, `List`, `Alert`) are still keyboard-driven; tapping their items is not
+implemented yet.
+
+### Closing
+
+The window always closes, and the process always ends. Some suites throw from
+`destroyApp`, some block in it, and some leave a non-daemon thread running; a
+plain `System.exit` handles none of those, which is why the host runs the shutdown
+on its own thread with a deadline and halts the JVM if the polite path does not
+finish.
+
 ## How the translation works
 
 ### 1. Class parsing

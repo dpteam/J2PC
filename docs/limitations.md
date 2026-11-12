@@ -95,6 +95,10 @@ ordinary Java classes on top of the same primitives — but each vendor needs it
 * **Threads.** Java threads are used directly. `Thread.yield()` behaves differently from a
   single-core handset, so busy-wait loops may spin hotter.
 * **`System.currentTimeMillis()`** returns real time, not handset time.
+* **Touch.** `Canvas` receives pointer events in its own coordinates, but the prebuilt screens
+  (`Form`, `List`, `Alert`) are keyboard-only: tapping their items does nothing yet.
+* **Key repeat.** `keyRepeated` is never delivered; the host relies on the platform's own key
+  handling, which reports a press once.
 
 ## Scale
 

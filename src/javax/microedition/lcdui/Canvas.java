@@ -112,12 +112,17 @@ public abstract class Canvas extends Displayable {
 
     public int getGameAction(int keyCode) {
         switch (keyCode) {
-            case java.awt.event.KeyEvent.VK_UP: return UP;
-            case java.awt.event.KeyEvent.VK_DOWN: return DOWN;
-            case java.awt.event.KeyEvent.VK_LEFT: return LEFT;
-            case java.awt.event.KeyEvent.VK_RIGHT: return RIGHT;
+            case java.awt.event.KeyEvent.VK_UP:
+            case java.awt.event.KeyEvent.VK_W: return UP;
+            case java.awt.event.KeyEvent.VK_DOWN:
+            case java.awt.event.KeyEvent.VK_S: return DOWN;
+            case java.awt.event.KeyEvent.VK_LEFT:
+            case java.awt.event.KeyEvent.VK_A: return LEFT;
+            case java.awt.event.KeyEvent.VK_RIGHT:
+            case java.awt.event.KeyEvent.VK_D: return RIGHT;
             case java.awt.event.KeyEvent.VK_ENTER:
-            case java.awt.event.KeyEvent.VK_SPACE: return FIRE;
+            case java.awt.event.KeyEvent.VK_SPACE:
+            case KEY_NUM5: return FIRE;
             case java.awt.event.KeyEvent.VK_F1:
             case java.awt.event.KeyEvent.VK_Q: return GAME_A;
             case java.awt.event.KeyEvent.VK_F2:
@@ -137,7 +142,13 @@ public abstract class Canvas extends Displayable {
             case java.awt.event.KeyEvent.VK_LEFT: return "LEFT";
             case java.awt.event.KeyEvent.VK_RIGHT: return "RIGHT";
             case java.awt.event.KeyEvent.VK_ENTER: return "ENTER";
-            default: return java.awt.event.KeyEvent.getKeyText(keyCode);
+            case KEY_STAR: return "STAR";
+            case KEY_POUND: return "POUND";
+            default:
+                if (keyCode >= KEY_NUM0 && keyCode <= KEY_NUM9) {
+                    return String.valueOf((char) keyCode);
+                }
+                return java.awt.event.KeyEvent.getKeyText(keyCode);
         }
     }
 
@@ -152,23 +163,59 @@ public abstract class Canvas extends Displayable {
 
     @Override
     boolean keyEvent(int keyCode, boolean pressed) {
+        int code = translateKeyCode(keyCode);
         if (pressed) {
-            keyPressed(keyCode);
+            keyPressed(code);
         } else {
-            keyReleased(keyCode);
+            keyReleased(code);
         }
         return true;
     }
 
+    /**
+     * Maps an AWT key code to the code MIDP would deliver.
+     *
+     * <p>A MIDlet compares {@code keyCode} against {@link #KEY_NUM5} and friends,
+     * so the host cannot simply forward the AWT value: the numeric keypad reports
+     * 96..105, the asterisk reports 106 and the number sign has no single AWT code.
+     * Digits already agree — {@code KEY_NUM0} is {@code '0'} — which is why the
+     * translation only touches the keys that do not.</p>
+     */
+    static int translateKeyCode(int awtKeyCode) {
+        if (awtKeyCode >= java.awt.event.KeyEvent.VK_NUMPAD0
+                && awtKeyCode <= java.awt.event.KeyEvent.VK_NUMPAD9) {
+            return KEY_NUM0 + (awtKeyCode - java.awt.event.KeyEvent.VK_NUMPAD0);
+        }
+        switch (awtKeyCode) {
+            case java.awt.event.KeyEvent.VK_MULTIPLY:
+            case java.awt.event.KeyEvent.VK_ASTERISK:
+                return KEY_STAR;
+            case java.awt.event.KeyEvent.VK_NUMBER_SIGN:
+                return KEY_POUND;
+            case java.awt.event.KeyEvent.VK_KP_UP:
+                return java.awt.event.KeyEvent.VK_UP;
+            case java.awt.event.KeyEvent.VK_KP_DOWN:
+                return java.awt.event.KeyEvent.VK_DOWN;
+            case java.awt.event.KeyEvent.VK_KP_LEFT:
+                return java.awt.event.KeyEvent.VK_LEFT;
+            case java.awt.event.KeyEvent.VK_KP_RIGHT:
+                return java.awt.event.KeyEvent.VK_RIGHT;
+            default:
+                return awtKeyCode;
+        }
+    }
+
     /** Internal hook used by the desktop host for pointer input. */
-    void pointerEvent(int x, int y, int kind) {
+    @Override
+    boolean pointerEvent(int x, int y, int kind) {
         if (kind == 0) {
             pointerPressed(x, y);
         } else if (kind == 1) {
             pointerReleased(x, y);
-        } else {
+        } else if (hasPointerMotionEvents()) {
             pointerDragged(x, y);
         }
+        return true;
     }
 
     void sizeChangedFromHost(int w, int h) {

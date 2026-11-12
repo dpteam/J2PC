@@ -116,4 +116,14 @@ public abstract class Displayable {
     boolean keyEvent(int keyCode, boolean pressed) {
         return false;
     }
+
+    /**
+     * Delivers a pointer event in this displayable's own coordinates.
+     *
+     * @param kind 0 for press, 1 for release, 2 for drag
+     * @return true when the event was consumed
+     */
+    boolean pointerEvent(int x, int y, int kind) {
+        return false;
+    }
 }
