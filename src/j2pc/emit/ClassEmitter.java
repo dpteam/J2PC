@@ -153,7 +153,30 @@ public final class ClassEmitter {
             }
         }
         ClassFile parent = universe.get(cf.superName());
-        if (parent == null || hasNoArgConstructor(parent)) {
+        if (parent == null) {
+            // A platform superclass: javac's implicit super() is right when it has a
+            // no-argument constructor, and fails when it does not — javax.microedition
+            // .lcdui.game.Sprite is the common case.
+            if (platformHasNoArgConstructor(cf.superName())) {
+                return;
+            }
+            out.blank();
+            out.line("// The archive record of this class has no constructor.");
+            out.line("// Its superclass has no no-argument constructor, so the implicit one");
+            out.line("// would not compile; instantiation failed on a handset as well.");
+            out.line("public " + Names.simpleName(cf.name()) + "() {");
+            out.indent();
+            String call = platformSuperCall(cf.superName());
+            if (call != null) {
+                out.line(call);
+            }
+            out.line("throw new NoSuchMethodError(\"" + Names.external(cf.name())
+                    + " has no constructor\");");
+            out.outdent();
+            out.line("}");
+            return;
+        }
+        if (hasNoArgConstructor(parent)) {
             // The implicit constructor javac inserts is exactly right.
             return;
         }
@@ -222,6 +245,89 @@ public final class ClassEmitter {
             }
         }
         return false;
+    }
+
+    /**
+     * {@code super(...)} with default arguments for the cheapest constructor of a
+     * platform type, or {@code null} when it cannot be determined.
+     */
+    private static String platformSuperCall(String internalName) {
+        try {
+            Class<?> type = Class.forName(internalName.replace('/', '.'), false,
+                    ClassEmitter.class.getClassLoader());
+            java.lang.reflect.Constructor<?> cheapest = null;
+            for (java.lang.reflect.Constructor<?> c : type.getDeclaredConstructors()) {
+                if (cheapest == null || c.getParameterCount() < cheapest.getParameterCount()) {
+                    cheapest = c;
+                }
+            }
+            if (cheapest == null) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder("super(");
+            Class<?>[] params = cheapest.getParameterTypes();
+            for (int i = 0; i < params.length; i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(defaultValue(params[i]));
+            }
+            return sb.append(");").toString();
+        } catch (ClassNotFoundException | LinkageError | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String defaultValue(Class<?> type) {
+        if (type == boolean.class) {
+            return "false";
+        }
+        if (type == long.class) {
+            return "0L";
+        }
+        if (type == float.class) {
+            return "0f";
+        }
+        if (type == double.class) {
+            return "0d";
+        }
+        if (type.isPrimitive()) {
+            return "0";
+        }
+        // A bare null is ambiguous when two constructors take unrelated reference
+        // types — Sprite(Image) and Sprite(Sprite) are exactly that.
+        return "(" + javaTypeName(type) + ") null";
+    }
+
+    /** Source-level name of a reflective type. */
+    private static String javaTypeName(Class<?> type) {
+        if (type.isArray()) {
+            return javaTypeName(type.getComponentType()) + "[]";
+        }
+        return type.getName().replace('$', '.');
+    }
+
+    /**
+     * True when the platform type is known and has a no-argument constructor.
+     *
+     * <p>An unloadable type answers {@code true}: a class that cannot be inspected
+     * is not a reason to emit a constructor that throws, and javac will report the
+     * real problem if there is one.</p>
+     */
+    private static boolean platformHasNoArgConstructor(String internalName) {
+        if (internalName == null) {
+            return true;
+        }
+        try {
+            Class<?> type = Class.forName(internalName.replace('/', '.'), false,
+                    ClassEmitter.class.getClassLoader());
+            type.getDeclaredConstructor();
+            return true;
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
+            return e instanceof ClassNotFoundException;
+        } catch (LinkageError | RuntimeException e) {
+            return true;
+        }
     }
 
     /** Appends the members that the archive record of this class is missing. */

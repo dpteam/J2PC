@@ -111,14 +111,20 @@ public abstract class Canvas extends Displayable {
     }
 
     public int getGameAction(int keyCode) {
+        // Numpad arrows are separate AWT codes but mean the same thing; the host
+        // translates them before they arrive, so only the canonical codes appear.
         switch (keyCode) {
             case java.awt.event.KeyEvent.VK_UP:
+            case java.awt.event.KeyEvent.VK_KP_UP:
             case java.awt.event.KeyEvent.VK_W: return UP;
             case java.awt.event.KeyEvent.VK_DOWN:
+            case java.awt.event.KeyEvent.VK_KP_DOWN:
             case java.awt.event.KeyEvent.VK_S: return DOWN;
             case java.awt.event.KeyEvent.VK_LEFT:
+            case java.awt.event.KeyEvent.VK_KP_LEFT:
             case java.awt.event.KeyEvent.VK_A: return LEFT;
             case java.awt.event.KeyEvent.VK_RIGHT:
+            case java.awt.event.KeyEvent.VK_KP_RIGHT:
             case java.awt.event.KeyEvent.VK_D: return RIGHT;
             case java.awt.event.KeyEvent.VK_ENTER:
             case java.awt.event.KeyEvent.VK_SPACE: return FIRE;

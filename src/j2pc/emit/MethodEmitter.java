@@ -176,6 +176,9 @@ public final class MethodEmitter {
             Log.warn("%s%s: super()/this() is not the first statement; delegation dropped",
                     cf.name(), method.desc());
             deferredInitPc = initPc;
+            // A super(...) call must still be the first statement, or javac inserts
+            // its own and fails when the superclass has no no-argument constructor.
+            prologue = droppedDelegationCall();
             initPc = -1;
         }
         if (initPc >= 0) {
@@ -249,7 +252,14 @@ public final class MethodEmitter {
                 // to the deferred form, where the delegation is stubbed out.
                 Log.warn("%s%s: super()/this() takes a computed argument; delegation dropped",
                         cf.name(), method.desc());
-                prologue = "";
+                // Java still requires *some* super(...) call as the first statement.
+                // Without one javac inserts super(), which only compiles when the
+                // superclass has a no-argument constructor — often it does not, and
+                // the class would then fail to compile for a reason unrelated to the
+                // dropped delegation. The cheapest superclass constructor is called
+                // with default arguments; the stub throws immediately after, so the
+                // object is never used.
+                prologue = droppedDelegationCall();
                 loopStart = 0;
                 deferredInitPc = initPc;
                 // Undo the declarations the discarded prologue made, so the same
@@ -315,8 +325,64 @@ public final class MethodEmitter {
         return sb.toString();
     }
 
-    /** The hoisted local declarations, as one block of text. */
-    private String joinDeclarations() {
+    /**
+     * First statement of a constructor whose delegation could not be reproduced.
+     *
+     * <p>Returns a {@code super(...)} call that always compiles: the cheapest
+     * superclass constructor with default arguments. When the superclass has a
+     * no-argument constructor this is simply {@code super()}; when it does not, the
+     * alternative would be a class that does not compile at all.</p>
+     */
+    private String droppedDelegationCall() {
+        ClassFile parent = names.classFile(cf.superName());
+        if (parent == null) {
+            return "super();\n";
+        }
+        for (ClassFile.Member m : parent.methods) {
+            if ("<init>".equals(m.name()) && "()V".equals(m.desc())) {
+                return "super();\n";
+            }
+        }
+        ClassFile.Member cheapest = null;
+        for (ClassFile.Member m : parent.methods) {
+            if (!"<init>".equals(m.name()) || m.desc() == null) {
+                continue;
+            }
+            if (cheapest == null || Descriptor.args(m.desc()).length
+                    < Descriptor.args(cheapest.desc()).length) {
+                cheapest = m;
+            }
+        }
+        if (cheapest == null) {
+            return "super();\n";
+        }
+        StringBuilder sb = new StringBuilder("super(");
+        String[] args = Descriptor.args(cheapest.desc());
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(defaultArgument(args[i]));
+        }
+        return sb.append(");\n").toString();
+    }
+
+    /** A literal acceptable as a default argument of the given descriptor. */
+    private static String defaultArgument(String desc) {
+        switch (desc.charAt(0)) {
+            case 'Z': return "false";
+            case 'J': return "0L";
+            case 'F': return "0f";
+            case 'D': return "0d";
+            case 'L':
+            case '[':
+                return "null";
+            default:
+                return "0";
+        }
+    }
+
+    /** The hoisted local declarations, as one block of text. */    private String joinDeclarations() {
         if (declarations.isEmpty()) {
             return "";
         }
@@ -882,6 +948,22 @@ public final class MethodEmitter {
                 }
             }
 
+            // The fall-through belongs to the protected region: `jump` flushes the
+            // pending operand stack into the `s` variables, and those stores must
+            // be guarded too. Emitting them after the catch would let an exception
+            // raised by the expression itself escape.
+            boolean lastSlice = idx >= insns.length || insns[idx].pc >= end;
+            if (lastSlice && !terminated) {
+                int next = nextPcOf(last);
+                if (next >= code.code.length) {
+                    spill();
+                    out.line("throw new IllegalStateException(\"fell off the end of the method\");");
+                } else {
+                    jump(next);
+                }
+                terminated = true;
+            }
+
             closeHandlers(wrapping, opened);
             if (wrapBlocks) {
                 out.outdent();
@@ -890,16 +972,6 @@ public final class MethodEmitter {
                 out.line("throw j2pc.rt.Sneaky.sneak(__unchecked);");
                 out.outdent();
                 out.line("}");
-            }
-        }
-
-        if (!terminated) {
-            int next = nextPcOf(last);
-            if (next >= code.code.length) {
-                spill();
-                out.line("throw new IllegalStateException(\"fell off the end of the method\");");
-            } else {
-                jump(next);
             }
         }
     }

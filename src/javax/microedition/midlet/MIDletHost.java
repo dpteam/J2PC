@@ -137,7 +137,8 @@ public final class MIDletHost {
     private static void showControls(String title) {
         String text = "Keyboard\n"
                 + "  Arrows / W A S D .............. move (UP, LEFT, DOWN, RIGHT)\n"
-                + "  Enter, Space .................. FIRE / select\n"
+                + "                                  also sent as keypad 2 4 6 8\n"
+                + "  Enter, Space .................. FIRE / select (also keypad 5)\n"
                 + "  Q or F1 ....................... GAME_A\n"
                 + "  E or F2 ....................... GAME_B\n"
                 + "  R or F3 ....................... GAME_C\n"
@@ -154,9 +155,9 @@ public final class MIDletHost {
                 + "  Ctrl+Q, menu Application > Quit  quit\n"
                 + "  F12, menu Help > Controls ....... this list\n"
                 + "\n"
-                + "Not every application listens to every key: a game that only\n"
-                + "reads the numeric keypad ignores the arrows, and one written\n"
-                + "for a touch handset ignores the keyboard entirely.";
+                + "Handset games split between reading the d-pad and reading the\n"
+                + "keypad, so an arrow key is reported as both. If a game moves\n"
+                + "twice per press, start it with -Dj2pc.numpadArrows=false.";
         JTextArea area = new JTextArea(text);
         area.setEditable(false);
         area.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));

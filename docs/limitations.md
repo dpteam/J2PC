@@ -154,9 +154,12 @@ missing", which is what the corpus numbers measure.
 
 ### Two structural limits
 
-* **`code too large`.** A recompiled method can exceed the 64 KB bytecode limit, because the
-  dispatch loop keeps every original block plus the spilling code. Only a handful of
-  hand-written giants hit this; splitting a method into helper blocks is the fix.
+* **`code too large`.** A recompiled method can exceed javac's 64 KB limit for a single try
+  block, because the dispatch loop keeps every original block plus the spilling code. The
+  emitter mitigates this — large methods get the generic catch per dispatch block, and a
+  protected region is cut into consecutive slices that all jump to the same handler — but a
+  method whose *own* bytecode exceeds 64 KB cannot be fixed by slicing. A handful of
+  hand-written giants remain in that category.
 * **Deferred `super(...)`.** Java requires the call to be first, but bytecode may compute its
   arguments with branches. Such a constructor is emitted with an implicit `super()` and the
   delegation replaced by a stub; a warning names the method.

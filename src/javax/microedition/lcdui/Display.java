@@ -183,6 +183,10 @@ public final class Display {
 
         private static final long serialVersionUID = 1L;
 
+        /** See {@link #deliver(int, boolean)}. */
+        private static final boolean NUMPAD_ARROWS =
+                !"false".equalsIgnoreCase(System.getProperty("j2pc.numpadArrows", "true"));
+
         private final BufferedImage buffer;
         private Displayable target;
 
@@ -204,16 +208,12 @@ public final class Display {
             addKeyListener(new KeyAdapter() {
                 @Override
                 public void keyPressed(KeyEvent e) {
-                    if (target != null) {
-                        target.keyEvent(e.getKeyCode(), true);
-                    }
+                    deliver(e.getKeyCode(), true);
                 }
 
                 @Override
                 public void keyReleased(KeyEvent e) {
-                    if (target != null) {
-                        target.keyEvent(e.getKeyCode(), false);
-                    }
+                    deliver(e.getKeyCode(), false);
                 }
             });
 
@@ -263,6 +263,50 @@ public final class Display {
         private int bufferY(MouseEvent e) {
             int y = (int) Math.round((e.getY() - offsetY) / scaleY);
             return Math.max(0, Math.min(buffer.getHeight() - 1, y));
+        }
+
+        /**
+         * Sends one AWT key event to the displayable.
+         *
+         * <p>An arrow key is also reported as the matching numeric key, because
+         * handset games split roughly in half: some read {@code getGameAction} and
+         * expect the d-pad, others switch on {@code KEY_NUM2}/{@code KEY_NUM8} and
+         * expect the keypad. A player only has one set of keys, so both are sent.
+         * {@code -Dj2pc.numpadArrows=false} turns the duplicate off for a game that
+         * reacts to both and would move twice.</p>
+         */
+        private void deliver(int awtKeyCode, boolean pressed) {
+            if (target == null) {
+                return;
+            }
+            target.keyEvent(awtKeyCode, pressed);
+            if (!NUMPAD_ARROWS) {
+                return;
+            }
+            int digit = numpadEquivalent(awtKeyCode);
+            if (digit != 0) {
+                target.keyEvent(digit, pressed);
+            }
+        }
+
+        /** Numeric key that a handset would report for the same physical key. */
+        private static int numpadEquivalent(int awtKeyCode) {
+            switch (awtKeyCode) {
+                case java.awt.event.KeyEvent.VK_UP:
+                case java.awt.event.KeyEvent.VK_KP_UP:
+                case java.awt.event.KeyEvent.VK_W: return Canvas.KEY_NUM2;
+                case java.awt.event.KeyEvent.VK_DOWN:
+                case java.awt.event.KeyEvent.VK_KP_DOWN:
+                case java.awt.event.KeyEvent.VK_S: return Canvas.KEY_NUM8;
+                case java.awt.event.KeyEvent.VK_LEFT:
+                case java.awt.event.KeyEvent.VK_KP_LEFT:
+                case java.awt.event.KeyEvent.VK_A: return Canvas.KEY_NUM4;
+                case java.awt.event.KeyEvent.VK_RIGHT:
+                case java.awt.event.KeyEvent.VK_KP_RIGHT:
+                case java.awt.event.KeyEvent.VK_D: return Canvas.KEY_NUM6;
+                case java.awt.event.KeyEvent.VK_SPACE: return Canvas.KEY_NUM5;
+                default: return 0;
+            }
         }
 
         void bind(Displayable d) {

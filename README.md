@@ -56,6 +56,7 @@ survives the trip unchanged.
 | Nokia UI API (`FullCanvas`, `DirectGraphics`, `DeviceControl`) | partial |
 | Bluetooth (`javax.bluetooth`) | stubs: the API compiles, there is no radio |
 | Launcher + asset loading | done |
+| Keyboard and pointer input | done |
 | CLI | done |
 | TUI (terminal interface) | done |
 | GUI (local web UI) | done |
@@ -219,8 +220,8 @@ host except the menu bar.
 
 | Input | MIDP meaning |
 |-------|--------------|
-| Arrows, `W` `A` `S` `D` | `UP`, `LEFT`, `DOWN`, `RIGHT` |
-| `Enter`, `Space` | `FIRE` / select |
+| Arrows, `W` `A` `S` `D` | `UP`, `LEFT`, `DOWN`, `RIGHT` (also sent as `KEY_NUM2/4/6/8`) |
+| `Enter`, `Space` | `FIRE` / select (also `KEY_NUM5`) |
 | `Q` or `F1` | `GAME_A` |
 | `E` or `F2` | `GAME_B` |
 | `R` or `F3` | `GAME_C` |
@@ -234,6 +235,15 @@ host except the menu bar.
 Not every application listens to everything: a game that only reads the numeric
 keypad ignores the arrows, and one written for a touch handset ignores the
 keyboard. That is the application's choice, not a limitation of the host.
+
+Handset games split roughly in half between reading `getGameAction` (the d-pad)
+and switching on `KEY_NUM2`/`KEY_NUM8` (the keypad), so an arrow key is reported
+as both — otherwise half the corpus would be unplayable. If a game reacts to both
+and moves twice per press, turn the duplicate off:
+
+```bash
+java -Dj2pc.numpadArrows=false -jar game.jar
+```
 
 ### Touch
 
