@@ -26,6 +26,21 @@ public class TextBox extends Screen {
         return field.getMaxSize();
     }
 
+    /**
+     * Sets the buffer limit and returns the previous one.
+     *
+     * <p>MIDP declares this {@code void}, but several vendor builds — and the
+     * suites compiled against them — use an {@code int} return. Java lets a caller
+     * discard a result, so returning a value compiles for both: code written
+     * against the {@code void} signature ignores it, code that stores it gets the
+     * old limit.</p>
+     */
+    public int setMaxSize(int maxSize) {
+        int previous = field.getMaxSize();
+        field.setMaxSize(maxSize);
+        return previous;
+    }
+
     public int getConstraints() {
         return field.getConstraints();
     }

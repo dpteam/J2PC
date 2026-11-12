@@ -50,8 +50,21 @@ public final class TypeMapper {
         if (from == null || to == null || from.equals(to)) {
             return true;
         }
-        if (from.startsWith("[") || to.startsWith("[")) {
+        boolean fromArray = from.startsWith("[");
+        boolean toArray = to.startsWith("[");
+        if (fromArray && toArray) {
             return true;
+        }
+        if (fromArray != toArray) {
+            // javac only allows a cast between a class and an array when the class
+            // is Object, Cloneable, Serializable or an interface. `(int[])(b)` is
+            // rejected outright, even though the JVM would check it at run time.
+            String cls = fromArray ? to : from;
+            return "java/lang/Object".equals(cls)
+                    || "java/lang/Cloneable".equals(cls)
+                    || "java/io/Serializable".equals(cls)
+                    || interfaces.contains(cls)
+                    || !appClasses.contains(cls);
         }
         if (stubs.contains(from) || stubs.contains(to)
                 || interfaces.contains(from) || interfaces.contains(to)) {

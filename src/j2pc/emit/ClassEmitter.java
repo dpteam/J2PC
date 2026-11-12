@@ -164,11 +164,16 @@ public final class ClassEmitter {
      * keeps both the compilation and the behaviour intact.</p>
      */
     private void emitMissingAbstractStubs() {
-        Map<String, ClassFile.Member> missing = new LinkedHashMap<>();
-        Map<String, String> declaredBy = new LinkedHashMap<>();
-        collectAbstract(cf.superName(), missing, declaredBy, 0);
+        Map<String, AbsSig> missing = new LinkedHashMap<>();
+        // Platform ancestors first: an archive class may implement what a platform
+        // interface declares, and the archive walk removes satisfied entries.
+        collectPlatform(cf.superName(), missing);
         for (String itf : cf.interfaceNames()) {
-            collectAbstract(itf, missing, declaredBy, 0);
+            collectPlatform(itf, missing);
+        }
+        collectAbstract(cf.superName(), missing, 0);
+        for (String itf : cf.interfaceNames()) {
+            collectAbstract(itf, missing, 0);
         }
         for (ClassFile.Member m : cf.methods) {
             // Only a non-static method can satisfy an abstract instance method;
@@ -183,39 +188,47 @@ public final class ClassEmitter {
         Log.debug("%s: %d abstract method(s) not implemented: %s",
                 cf.name(), missing.size(), missing.keySet());
         java.util.Set<String> usedNames = new java.util.HashSet<>();
-        for (Map.Entry<String, ClassFile.Member> e : missing.entrySet()) {
-            ClassFile.Member m = e.getValue();
-            String owner = declaredBy.get(e.getKey());
+        for (AbsSig sig : missing.values()) {
             // The stub must carry the name the declaring type gave the method,
             // otherwise it does not implement anything.
-            String name = names.method(owner == null ? cf.name() : owner, m.name(), m.desc());
-            if (!usedNames.add(name + Descriptor.args(m.desc()).length)) {
+            String name = names.method(sig.owner(), sig.name(), sig.desc());
+            String[] args = Descriptor.args(sig.desc());
+            // Two distinct abstract methods can share a name and an arity —
+            // `Code(byte[],String)` and `Code(Code,String)` are different overloads.
+            // Only an identical Java signature would be a duplicate.
+            java.util.List<String> argTypes = new java.util.ArrayList<>(args.length);
+            for (String arg : args) {
+                argTypes.add(types.ref(arg));
+            }
+            if (!usedNames.add(name + "(" + String.join(",", argTypes) + ")")) {
                 continue;
             }
             out.blank();
-            String ret = Descriptor.returnType(m.desc());
-            StringBuilder sig = new StringBuilder("public ");
-            sig.append(types.ref(ret)).append(' ').append(name).append('(');
-            String[] args = Descriptor.args(m.desc());
-            for (int i = 0; i < args.length; i++) {
+            String ret = Descriptor.returnType(sig.desc());
+            StringBuilder sb = new StringBuilder("public ");
+            sb.append(types.ref(ret)).append(' ').append(name).append('(');
+            for (int i = 0; i < argTypes.size(); i++) {
                 if (i > 0) {
-                    sig.append(", ");
+                    sb.append(", ");
                 }
-                sig.append(types.ref(args[i])).append(" arg").append(i);
+                sb.append(argTypes.get(i)).append(" arg").append(i);
             }
-            sig.append(") {");
-            out.line(sig.toString());
+            sb.append(") {");
+            out.line(sb.toString());
             out.indent();
             out.line("throw new AbstractMethodError(\"not implemented: "
-                    + Names.external(m.name()) + "\");");
+                    + Names.external(sig.name()) + "\");");
             out.outdent();
             out.line("}");
         }
     }
 
+    /** An abstract method that a concrete class still has to provide. */
+    private record AbsSig(String name, String desc, String owner) {
+    }
+
     /** Adds every abstract method reachable from {@code internal}, recursively. */
-    private void collectAbstract(String internal, Map<String, ClassFile.Member> out,
-                                 Map<String, String> declaredBy, int depth) {
+    private void collectAbstract(String internal, Map<String, AbsSig> out, int depth) {
         if (internal == null || depth > 16) {
             return;
         }
@@ -233,19 +246,87 @@ public final class ClassEmitter {
             boolean abstractMethod = m.isAbstract()
                     || (superType.isInterface() && m.code() == null && !m.isStatic());
             if (abstractMethod) {
-                if (!out.containsKey(key)) {
-                    out.put(key, m);
-                    declaredBy.put(key, internal);
-                }
+                out.putIfAbsent(key, new AbsSig(m.name(), m.desc(), internal));
             } else if (!m.isStatic()) {
                 // A concrete instance implementation anywhere satisfies it.
                 out.remove(key);
             }
         }
-        collectAbstract(superType.superName(), out, declaredBy, depth + 1);
+        collectAbstract(superType.superName(), out, depth + 1);
         for (String itf : superType.interfaceNames()) {
-            collectAbstract(itf, out, declaredBy, depth + 1);
+            collectAbstract(itf, out, depth + 1);
         }
+    }
+
+    /**
+     * Adds the abstract methods of a platform type the archive does not contain.
+     *
+     * <p>{@code java.io.DataInput}, {@code javax.microedition.lcdui.CommandListener}
+     * and friends are not in the universe, so the only way to know what a class
+     * still owes them is to ask the running JVM. A type that cannot be loaded is
+     * simply skipped: the class then compiles exactly as far as javac allows.</p>
+     */
+    private void collectPlatform(String internal, Map<String, AbsSig> out) {
+        if (internal == null || universe.containsKey(internal)) {
+            return;
+        }
+        Class<?> type;
+        try {
+            type = Class.forName(internal.replace('/', '.'), false,
+                    ClassEmitter.class.getClassLoader());
+        } catch (ClassNotFoundException | LinkageError | RuntimeException e) {
+            return;
+        }
+        for (java.lang.reflect.Method m : type.getMethods()) {
+            if (!java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
+                continue;
+            }
+            String desc = descriptorOf(m);
+            out.putIfAbsent(m.getName() + desc, new AbsSig(m.getName(), desc, internal));
+        }
+    }
+
+    /** JVM descriptor of a reflective method. */
+    private static String descriptorOf(java.lang.reflect.Method m) {
+        StringBuilder sb = new StringBuilder("(");
+        for (Class<?> p : m.getParameterTypes()) {
+            sb.append(descriptorOf(p));
+        }
+        return sb.append(')').append(descriptorOf(m.getReturnType())).toString();
+    }
+
+    private static String descriptorOf(Class<?> c) {
+        if (c.isArray()) {
+            return c.getName().replace('.', '/');
+        }
+        if (!c.isPrimitive()) {
+            return "L" + c.getName().replace('.', '/') + ";";
+        }
+        if (c == boolean.class) {
+            return "Z";
+        }
+        if (c == byte.class) {
+            return "B";
+        }
+        if (c == char.class) {
+            return "C";
+        }
+        if (c == short.class) {
+            return "S";
+        }
+        if (c == int.class) {
+            return "I";
+        }
+        if (c == long.class) {
+            return "J";
+        }
+        if (c == float.class) {
+            return "F";
+        }
+        if (c == double.class) {
+            return "D";
+        }
+        return "V";
     }
 
     private void emitField(ClassFile.Member f) {

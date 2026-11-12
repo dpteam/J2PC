@@ -146,7 +146,7 @@ public final class NameRegistry {
             if (!names.methodNames.containsKey(key)) {
                 String base = methodNames.get(key);
                 names.methodNames.put(key, names.uniqueMethod(
-                        base == null ? Names.external(name) : base));
+                        base == null ? Names.external(name) : base, paramSignature(desc)));
             }
         } else {
             String key = name + ":" + desc;
@@ -177,8 +177,10 @@ public final class NameRegistry {
         // therefore reserved for the whole inherited set first, and only genuinely
         // new signatures are disambiguated.
         Map<String, String> inheritedMethods = inheritedMethodNames(cf);
-        for (String name : inheritedMethods.values()) {
-            names.usedMethods.add(name);
+        for (Map.Entry<String, String> e : inheritedMethods.entrySet()) {
+            // Reserve the signature, not the bare name: a different parameter list
+            // is a different method and may reuse the name.
+            names.usedMethods.add(e.getValue() + paramSigOfKey(e.getKey()));
         }
         java.util.List<String> keys = new java.util.ArrayList<>();
         for (ClassFile.Member m : cf.methods) {
@@ -198,7 +200,7 @@ public final class NameRegistry {
             }
             String base = methodNames.get(key);
             if (base != null) {
-                names.methodNames.put(key, names.uniqueMethod(base));
+                names.methodNames.put(key, names.uniqueMethod(base, paramSigOfKey(key)));
             }
         }
         classes.put(cf.name(), names);
@@ -314,6 +316,12 @@ public final class NameRegistry {
         return close < 0 ? desc : desc.substring(0, close + 1);
     }
 
+    /** Parameter part of a {@link #methodKey} key. */
+    private static String paramSigOfKey(String key) {
+        String[] parts = key.split("\u0000", -1);
+        return parts.length > 1 ? parts[1] : "";
+    }
+
     /** {@code (I)V -> V}. */
     private static String returnType(String desc) {
         int close = desc.indexOf(')');
@@ -403,6 +411,13 @@ public final class NameRegistry {
         final Map<String, String> field = new HashMap<>();
         final Map<String, String> methodNames = new HashMap<>();
         final Set<String> usedFields = new HashSet<>();
+        /**
+         * Taken method signatures, as {@code name(paramSig)}. Only methods with the
+         * same parameter list can clash: Java happily holds {@code read()} and
+         * {@code read(byte[],int,int)} in one hierarchy, and reserving the bare
+         * name would rename one of them for no reason — which breaks overriding a
+         * platform method such as {@code InputStream.read()}.
+         */
         final Set<String> usedMethods = new HashSet<>();
 
         String uniqueField(String raw) {
@@ -415,10 +430,10 @@ public final class NameRegistry {
             return candidate;
         }
 
-        String uniqueMethod(String base) {
+        String uniqueMethod(String base, String paramSig) {
             String candidate = base;
             int n = 2;
-            while (!usedMethods.add(candidate)) {
+            while (!usedMethods.add(candidate + paramSig)) {
                 candidate = base + "_m" + n++;
             }
             return candidate;

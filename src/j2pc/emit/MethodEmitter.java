@@ -2546,6 +2546,13 @@ public final class MethodEmitter {
     }
 
     private String cast(Val recv, String owner) {
+        // `this` is already the right type and must not be cast. Java grants a
+        // subclass access to inherited protected members only through a reference
+        // whose type is the subclass itself, so `((Superclass)(this)).field` is a
+        // compile error where `this.field` is fine.
+        if ("this".equals(recv.code)) {
+            return recv.code;
+        }
         String want = types.refInternal(owner);
         if (recv.type.kind == SlotType.REF) {
             if (recv.type.desc != null) {
@@ -2620,12 +2627,15 @@ public final class MethodEmitter {
         boolean knownArray = arr.sem.kind == SlotType.REF
                 && arr.sem.desc != null && arr.sem.desc.startsWith("[");
         if (knownArray) {
-            return "((" + javaType(arr.sem) + ")(" + arr.code + "))";
+            // The variable may be declared with the merged type (`Object`, or an
+            // unrelated class), which javac will not cast to an array directly.
+            return refCast(javaType(arr.sem), arr.sem, arr.type == null ? null : arr.type.desc,
+                    arr.code);
         }
         if (fallbackArrayType == null) {
             return arr.code;
         }
-        return "((" + fallbackArrayType + ")(" + arr.code + "))";
+        return "((" + fallbackArrayType + ")(java.lang.Object)(" + arr.code + "))";
     }
 
     private static SlotType elemType(SlotType arrayType) {
@@ -2643,22 +2653,25 @@ public final class MethodEmitter {
     }
 
     /**
-     * Builds {@code new T[n][]...} for {@code anewarray}. The component type may
-     * itself be an array ({@code anewarray [I} creates {@code int[n][]}).
+     * Builds {@code new T[n][]...} for {@code anewarray} and
+     * {@code multianewarray}.
      *
-     * <p>Note that a single-letter class name such as {@code n} is <em>not</em> a
-     * primitive descriptor, even though it has the same length — obfuscators rely
-     * on exactly that confusion.</p>
+     * <p>The two opcodes pass different things: {@code anewarray} carries a
+     * <em>class name</em>, {@code multianewarray} carries a <em>descriptor</em>.
+     * That matters because obfuscators name classes after primitive descriptor
+     * letters — a class called {@code J} is an interface, not {@code long}. Only a
+     * component that starts with {@code [} is read as a descriptor; a bare name is
+     * always a class.</p>
      */
-    private String arrayCreation(String componentInternalName, String size) {
-        String desc = componentInternalName;
-        int dims = 0;
-        if (desc.startsWith("[")) {
-            while (dims < desc.length() && desc.charAt(dims) == '[') {
-                dims++;
-            }
-            desc = desc.substring(dims);
+    private String arrayCreation(String component, String size) {
+        if (!component.startsWith("[")) {
+            return "new " + types.refInternal(component) + "[" + size + "]";
         }
+        int dims = 0;
+        while (dims < component.length() && component.charAt(dims) == '[') {
+            dims++;
+        }
+        String desc = component.substring(dims);
         String base;
         if (desc.startsWith("L") && desc.endsWith(";")) {
             base = types.ref(desc);
