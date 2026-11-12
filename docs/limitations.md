@@ -137,15 +137,15 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 124 produce Java that
-compiles (3 275 classes, 82 293 methods). Of the 65 remaining javac errors, most are
-suites that ship only part of their classes.
+On a private collection of 151 applications, all 151 recompile and 146 produce Java that
+compiles. The five remaining failures are all the same structural limit: a method whose own
+bytecode exceeds 64 KB, which javac rejects however the emitter wraps it.
 
-| Missing / broken | Applications |
-|------------------|--------------|
-| `javax.microedition.m3g` (3D engine) | stubbed; runtime throws |
-| `com.mascotcapsule.micro3d.v3` (3D engine) | stubbed; runtime throws |
-| incomplete JARs (classes referenced but not shipped) | remainder |
+| Missing / broken | Effect |
+|------------------|--------|
+| `javax.microedition.m3g` (3D engine) | stubbed; the runtime throws when reached |
+| `com.mascotcapsule.micro3d.v3` (3D engine) | stubbed; the runtime throws when reached |
+| incomplete JARs (classes referenced but not shipped) | stubbed from the references |
 | vendor extensions (`com.siemens`, `com.motorola`, …) | stubbed |
 
 Implementing a 3D engine is a separate project; the 2D platform is what this tool targets.

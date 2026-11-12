@@ -56,9 +56,9 @@ public final class MethodEmitter {
     private static final int SLICE_CHARS = 8000;
 
     /**
-     * Instruction count above which the whole-body exception wrapper is replaced
-     * by one wrapper per dispatch block. Chosen well below the point where javac
-     * reports "code too large for try statement".
+     * Instruction count above which the single exception wrapper is replaced by
+     * one wrapper per dispatch block. Both forms cost bytecode; the choice is
+     * which 64 KB limit is hit first — the try block's or the method's.
      */
     private static final int LARGE_METHOD = 900;
 
@@ -83,6 +83,8 @@ public final class MethodEmitter {
     private Map<Integer, Integer> indexOf;
     private Analysis analysis;
     private boolean flat;
+    /** Program counter of the instruction being emitted; for diagnostics only. */
+    private int currentPc = -1;
 
     private final List<Val> stack = new ArrayList<>();
     private final Map<String, String> varNames = new HashMap<>();
@@ -285,13 +287,12 @@ public final class MethodEmitter {
             }
         }
 
-        // A method with thousands of instructions expands past javac's 64 KB limit
-        // for a single try block. Wrapping each dispatch block instead keeps every
-        // try small; the catch is identical, so behaviour does not change. A
-        // constructor with a prologue keeps the whole-body form: its prologue may
-        // declare variables the body uses, and those cannot be scoped to a try.
-        wrapBlocks = !flat && insns.length > LARGE_METHOD
-                && !prologueNeedsThrows && prologueTail.isEmpty();
+        // javac refuses a try block above 64 KB, and a recompiled method can reach
+        // that easily: one bytecode instruction becomes several statements. Large
+        // methods therefore get the catch per dispatch block; small ones keep the
+        // single wrapper, because a try block per block costs bytecode of its own
+        // and a method has a 64 KB budget of its own.
+        wrapBlocks = !flat && insns.length > LARGE_METHOD && !prologueNeedsThrows;
 
         if (flat) {
             emitFlat(loopStart);
@@ -303,6 +304,10 @@ public final class MethodEmitter {
         StringBuilder sb = new StringBuilder(signature());
         sb.append(" {\n");
         sb.append(superCall);
+        // Declarations and prologue stores stay outside the try: a variable declared
+        // inside a try block would not be visible to the dispatch loop.
+        sb.append(prologueTail);
+        sb.append(joinDeclarations());
 
         // Bytecode has no checked exceptions: any API call may throw one without
         // a throws clause. The wrapper keeps the generated source compilable
@@ -310,12 +315,9 @@ public final class MethodEmitter {
         if (wrapBlocks) {
             // A method this large would exceed javac's 64 KB limit for a single
             // try block, so the same catch is emitted per dispatch block instead.
-            sb.append(joinDeclarations());
             sb.append(body);
         } else {
             sb.append("try {\n");
-            sb.append(prologueTail);
-            sb.append(joinDeclarations());
             sb.append(body);
             sb.append("} catch (java.lang.Throwable __unchecked) {\n");
             sb.append("throw j2pc.rt.Sneaky.sneak(__unchecked);\n");
@@ -863,8 +865,12 @@ public final class MethodEmitter {
         return true;
     }
 
-    private int nextPcOf(int pc) {
-        Integer idx = indexOf.get(pc);
+    /** True for the two switch opcodes, which are emitted as one Java statement. */
+    private static boolean isSwitch(Instruction ins) {
+        return ins.op == O.TABLESWITCH || ins.op == O.LOOKUPSWITCH;
+    }
+
+    private int nextPcOf(int pc) {        Integer idx = indexOf.get(pc);
         if (idx == null) {
             return -1;
         }
@@ -906,6 +912,20 @@ public final class MethodEmitter {
         // table says it should, and normal flow just continues into the next one.
         int chunk = (wrapping.isEmpty() && !wrapBlocks) ? Integer.MAX_VALUE : TRY_CHUNK;
         while (idx < insns.length && insns[idx].pc < end && !terminated) {
+            // A `switch` becomes one Java case label per bytecode target, so a
+            // large one can be tens of thousands of characters on its own — more
+            // than javac accepts in a single try block. It is emitted outside the
+            // protected region: the statement only compares an int and assigns
+            // `__pc`, so it cannot throw, and the targets it jumps to are still
+            // protected.
+            if (isSwitch(insns[idx])) {
+                last = insns[idx].pc;
+                currentPc = last;
+                terminated = exec(insns[idx]);
+                idx++;
+                continue;
+            }
+
             int sliceEnd = idx;
             while (sliceEnd < insns.length && insns[sliceEnd].pc < end
                     && sliceEnd - idx < chunk) {
@@ -936,11 +956,16 @@ public final class MethodEmitter {
                 if (idx > sliceFirst && out.length() - sliceStartChars > SLICE_CHARS) {
                     break;
                 }
+                if (idx > sliceFirst && isSwitch(insns[idx])) {
+                    // Leave the switch to the outer loop, which emits it unprotected.
+                    break;
+                }
                 Instruction ins = insns[idx];
                 if (opts.lineComments) {
                     emitLineComment(ins.pc);
                 }
                 last = ins.pc;
+                currentPc = ins.pc;
                 terminated = exec(ins);
                 idx++;
                 if (terminated) {
@@ -1183,8 +1208,31 @@ public final class MethodEmitter {
         }
     }
 
-    private Val materialize(Val v) {
-        if (isSimple(v.code)) {
+    /**
+     * Gives a value the Java type the analysis proved it has.
+     *
+     * <p>A slot whose uses disagree is declared with the merged type, often
+     * {@code Object}, while the analysis still knows the value is a {@code long}.
+     * That difference matters for the {@code dup} family, which has to know whether
+     * a value occupies one slot or two: reading the merged type would treat a long
+     * as a reference and duplicate the wrong thing.</p>
+     */
+    private Val refine(Val v) {
+        if (v.sem == null || v.sem.kind == v.type.kind || v.sem.kind == SlotType.UNSET) {
+            return v;
+        }
+        String expr = coerce(v, v.sem);
+        String nm = "__a" + (tempSeq++);
+        if (prologueMode) {
+            declareInline(nm, javaType(v.sem), expr);
+        } else {
+            declare(nm, javaType(v.sem), v.sem.defaultLiteral());
+            out.line(nm + " = " + expr + ";");
+        }
+        return new Val(nm, v.sem, v.sem, null);
+    }
+
+    private Val materialize(Val v) {        if (isSimple(v.code)) {
             return v;
         }
         String nm = "__a" + (tempSeq++);
@@ -1219,6 +1267,10 @@ public final class MethodEmitter {
 
     private Val pop() {
         if (stack.isEmpty()) {
+            // The analysis should have rejected such bytecode, so reaching this is
+            // a translator bug. Say so rather than silently emitting a null: the
+            // generated code stays compilable, and the log points at the method.
+            Log.debug("%s%s: operand stack underflow at pc %d", cf.name(), method.desc(), currentPc);
             return new Val("null", SlotType.OBJECT_T, null);
         }
         return stack.remove(stack.size() - 1);
@@ -1738,7 +1790,7 @@ public final class MethodEmitter {
                 return false;
             }
             case O.DUP2: {
-                Val a = pop();
+                Val a = refine(pop());
                 if (a.type.isCategory2()) {
                     a = materialize(a);
                     push(a);

@@ -20,6 +20,17 @@ public class ImageItem extends Item {
         setLayout(layout);
     }
 
+    /**
+     * Five-argument form used by some vendor builds and by MIDP 3.0.
+     *
+     * <p>The extra parameter selects an appearance mode that the desktop host does
+     * not model; accepting and ignoring it keeps suites compiled against those
+     * variants working.</p>
+     */
+    public ImageItem(String label, Image image, int layout, String altText, int appearanceMode) {
+        this(label, image, layout, altText);
+    }
+
     public Image getImage() {
         return image;
     }

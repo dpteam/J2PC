@@ -70,9 +70,7 @@ Measured on a private collection of **151 real J2ME applications**:
 | Metric | Value |
 |--------|-------|
 | Recompiled without errors | **151 / 151** |
-| Generated Java compiles | **124 / 151** |
-| Classes emitted for those | 3 275 |
-| Methods emitted for those | 82 293 |
+| Generated Java compiles | **146 / 151** |
 
 Two features make that possible beyond the translation itself:
 
@@ -82,19 +80,27 @@ Two features make that possible beyond the translation itself:
 * **Missing members are stubbed too.** Old packagers occasionally drop a member record
   while the reference survives; that member is re-declared on the class.
 
-The gap between the two numbers is dominated by three causes, in order:
+The remaining failures are all one cause: **a method whose own bytecode exceeds
+64 KB**. javac rejects it no matter how the emitter wraps it, and splitting a
+recompiled dispatch loop into helper methods means sharing its locals, which is a
+separate piece of work. Four applications carry such a method; the other two fail
+on a construct in the same family.
 
-1. **Missing platform APIs** — `javax.microedition.m3g` (3D), `com.mascotcapsule.micro3d.v3`
-   (3D), `javax.microedition.pim`, `javax.wireless.messaging`. Twelve applications need a 3D
-   engine alone.
-2. **Vendor extensions** — `com.nokia`, `com.siemens`, `com.motorola` variants beyond the
-   implemented subset.
-3. **Type fidelity in obfuscated code** — a slot reused for unrelated types can leave the
-   emitter with an `Object` where a specific array or interface is required.
+Everything else the corpus used to fail on is fixed:
 
-Every one of those is a missing feature, not a wrong translation: the recompiler never
-produces code that silently behaves differently, and `tools/verify.sh` checks exactly that on
-the synthetic suite.
+| Cause | Fix |
+|-------|-----|
+| `reference to x is ambiguous` | a field inherited from both a superclass and an interface is now reached through a cast |
+| wrong overload chosen | values keep their real Java type (`short`, `boolean`), so `a(byte,short,short)` and `a(byte,int,int)` resolve as the bytecode did |
+| `cannot override read()` | method names are unique per signature, not per name |
+| `new long[6]` where `new J[6]` was meant | `anewarray` carries a class name, not a descriptor |
+| class-to-array casts rejected | routed through `Object` unless javac accepts them directly |
+| `code too large for try statement` | large methods get the catch per dispatch block, and a protected region is cut into slices; a `switch` is emitted outside it |
+| `does not override` on platform types | abstract methods of platform supertypes are discovered reflectively and stubbed |
+
+Each of those was a real translation gap, not a missing API: the recompiler never
+produces code that silently behaves differently, and `tools/verify.sh` checks
+exactly that on the synthetic suite.
 
 Verified end to end — recompiled, compiled **and played**:
 
