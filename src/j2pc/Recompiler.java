@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -101,6 +102,8 @@ public final class Recompiler {
         // package, which J2ME suites do all the time. Such classes move into a
         // synthetic package and every reference is rewritten.
         TypeMapper types = buildTypeMapper(classes.keySet());
+        types.setHierarchy(hierarchyOf(classes.values()), interfaceNames(classes.values()),
+                classes.keySet());
 
         if (opts.generateStubs) {
             writeStubs(outRoot, classes, types, registry, result);
@@ -198,9 +201,30 @@ public final class Recompiler {
         Log.info("generated %d stub class(es) for missing APIs", stubs.size());
     }
 
+    /** Superclass of every class, so cast legality can be decided. */
+    private static Map<String, String> hierarchyOf(java.util.Collection<ClassFile> classes) {
+        Map<String, String> out = new HashMap<>();
+        for (ClassFile cf : classes) {
+            if (cf.superName() != null) {
+                out.put(cf.name(), cf.superName());
+            }
+        }
+        return out;
+    }
+
+    /** Names of the interfaces among the application classes. */
+    private static Set<String> interfaceNames(java.util.Collection<ClassFile> classes) {
+        Set<String> out = new HashSet<>();
+        for (ClassFile cf : classes) {
+            if (cf.isInterface()) {
+                out.add(cf.name());
+            }
+        }
+        return out;
+    }
+
     /** True when the suite mixes packaged and default-package classes. */
-    private static boolean isMixed(java.util.Collection<String> classNames) {
-        boolean hasPackaged = false;
+    private static boolean isMixed(java.util.Collection<String> classNames) {        boolean hasPackaged = false;
         boolean hasDefault = false;
         for (String name : classNames) {
             if (Names.packageName(name).isEmpty()) {

@@ -28,6 +28,11 @@ public class Alert extends Screen {
         setTitleInternal(title);
     }
 
+    /** No-argument form, used by subclasses that delegate to their own setup. */
+    protected Alert() {
+        setTitleInternal("");
+    }
+
     public Alert(String title, String alertText, Image alertImage, int alertType) {
         setTitleInternal(title);
         this.string = alertText;

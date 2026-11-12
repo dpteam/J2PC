@@ -23,6 +23,58 @@ public final class TypeMapper {
 
     private final Map<String, String> renamed = new HashMap<>();
     private final Set<String> stubs = new HashSet<>();
+    /** Superclass of every application class. */
+    private final Map<String, String> superOf = new HashMap<>();
+    /** Application interfaces. */
+    private final Set<String> interfaces = new HashSet<>();
+    /** Every application class name. */
+    private final Set<String> appClasses = new HashSet<>();
+
+    /** Records the hierarchy, so cast legality can be decided. */
+    public void setHierarchy(Map<String, String> superOf, Set<String> interfaces,
+                             Set<String> appClasses) {
+        this.superOf.putAll(superOf);
+        this.interfaces.addAll(interfaces);
+        this.appClasses.addAll(appClasses);
+    }
+
+    /**
+     * True when javac will accept a cast from {@code from} to {@code to}.
+     *
+     * <p>Two unrelated <em>classes</em> cannot be cast to each other, and javac
+     * rejects it; the JVM allows the instruction and fails at run time instead. A
+     * cast involving an interface, a stub or an unknown type is always accepted.
+     * Everything else is decided by walking the recorded hierarchy.</p>
+     */
+    public boolean castable(String from, String to) {
+        if (from == null || to == null || from.equals(to)) {
+            return true;
+        }
+        if (from.startsWith("[") || to.startsWith("[")) {
+            return true;
+        }
+        if (stubs.contains(from) || stubs.contains(to)
+                || interfaces.contains(from) || interfaces.contains(to)) {
+            return true;
+        }
+        if (!appClasses.contains(from) || !appClasses.contains(to)) {
+            return true;
+        }
+        return isSubtype(from, to) || isSubtype(to, from);
+    }
+
+    /** Walks the recorded superclass chain. */
+    private boolean isSubtype(String type, String ancestor) {
+        String current = type;
+        int guard = 0;
+        while (current != null && guard++ < 64) {
+            if (current.equals(ancestor)) {
+                return true;
+            }
+            current = superOf.get(current);
+        }
+        return false;
+    }
 
     /** Registers that {@code from} is emitted as {@code to} (both internal names). */
     public void rename(String from, String to) {

@@ -1097,7 +1097,13 @@ public final class MethodEmitter {
     private String refCast(String targetType, SlotType target, String actualInternal, String code) {
         boolean stub = types.isStub(actualInternal)
                 || (target != null && target.desc != null && types.isStub(target.desc));
-        if (stub) {
+        boolean unrelated = target != null && target.desc != null
+                && !types.castable(actualInternal, target.desc);
+        if (stub || unrelated) {
+            // A cast between unrelated classes is rejected by javac even though the
+            // JVM allows the instruction, and a cast to or from a stub cannot be
+            // checked at all. Routing through Object performs the same runtime check
+            // and always compiles.
             return "((" + targetType + ")(java.lang.Object)(" + code + "))";
         }
         return "((" + targetType + ")(" + code + "))";
@@ -2549,13 +2555,7 @@ public final class MethodEmitter {
                     return recv.code;
                 }
             }
-            // A cast between a stub type and anything else cannot be checked by
-            // javac, so it is routed through Object, which always compiles.
-            if (types.isStub(owner)
-                    || (recv.type.desc != null && types.isStub(recv.type.desc))) {
-                return "((" + want + ")(java.lang.Object)(" + recv.code + "))";
-            }
-            return "((" + want + ")(" + recv.code + "))";
+            return refCast(want, SlotType.ref(owner), recv.type.desc, recv.code);
         }
         return "((" + want + ")(" + recv.code + "))";
     }

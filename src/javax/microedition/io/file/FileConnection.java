@@ -55,6 +55,9 @@ public interface FileConnection extends javax.microedition.io.StreamConnection {
 
     java.util.Enumeration<String> list() throws IOException;
 
+    /** MIDP 2.0: lists the directory contents with a filter. */
+    java.util.Enumeration<String> list(String filter, boolean includeHidden) throws IOException;
+
     void create() throws IOException;
 
     void truncate(long byteOffset) throws IOException;

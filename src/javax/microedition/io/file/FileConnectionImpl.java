@@ -144,8 +144,32 @@ public final class FileConnectionImpl implements FileConnection {
     }
 
     @Override
-    public void create() throws IOException {
-        checkOpen();
+    public java.util.Enumeration<String> list(String filter, boolean includeHidden) throws IOException {
+        java.util.Vector<String> names = new java.util.Vector<>();
+        if (!Files.isDirectory(path)) {
+            return names.elements();
+        }
+        String glob = filter == null || filter.isEmpty() || "*".equals(filter) ? null : filter;
+        try (java.util.stream.Stream<Path> children = Files.list(path)) {
+            children.sorted().forEach(p -> {
+                String name = p.getFileName().toString();
+                if (!includeHidden && name.startsWith(".")) {
+                    return;
+                }
+                if (glob != null) {
+                    String regex = glob.replace(".", "\\.").replace("*", ".*").replace("?", ".");
+                    if (!name.matches(regex)) {
+                        return;
+                    }
+                }
+                names.add(name);
+            });
+        }
+        return names.elements();
+    }
+
+    @Override
+    public void create() throws IOException {        checkOpen();
         Files.createDirectories(path.getParent() == null ? Path.of(".") : path.getParent());
         Files.createFile(path);
     }

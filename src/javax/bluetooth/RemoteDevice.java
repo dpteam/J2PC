@@ -14,6 +14,16 @@ public class RemoteDevice {
         return new RemoteDevice(address);
     }
 
+    /**
+     * Vendor overload that resolves the remote device of an open connection.
+     *
+     * <p>Not part of JSR-82, but several handset implementations expose it.</p>
+     */
+    public static RemoteDevice getRemoteDevice(javax.microedition.io.Connection conn)
+            throws java.io.IOException {
+        return new RemoteDevice("000000000000");
+    }
+
     public boolean isTrustedDevice() {
         return false;
     }
