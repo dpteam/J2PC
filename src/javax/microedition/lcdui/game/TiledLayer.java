@@ -65,6 +65,16 @@ public class TiledLayer extends Layer {
         return tileHeight;
     }
 
+    /** Width of a single cell; part of the MIDP 2.0 API. */
+    public int getCellWidth() {
+        return tileWidth;
+    }
+
+    /** Height of a single cell; part of the MIDP 2.0 API. */
+    public int getCellHeight() {
+        return tileHeight;
+    }
+
     public void fillCells(int col, int row, int numCols, int numRows, int tileIndex) {
         for (int c = col; c < col + numCols && c < cols; c++) {
             for (int r = row; r < row + numRows && r < rows; r++) {

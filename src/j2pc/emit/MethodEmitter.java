@@ -1783,7 +1783,13 @@ public final class MethodEmitter {
             return;
         }
         SlotType t = localType(slot, kind, precise);
-        declare(nm, javaType(t), t.defaultLiteral());
+        if (prologueMode) {
+            // Locals declared with the others would appear after super(...), but a
+            // constructor prologue may already store into them.
+            declareInline(nm, javaType(t), t.defaultLiteral());
+        } else {
+            declare(nm, javaType(t), t.defaultLiteral());
+        }
     }
 
     /**

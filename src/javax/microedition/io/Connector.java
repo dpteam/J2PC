@@ -37,6 +37,9 @@ public final class Connector {
         if (name.startsWith("file://")) {
             return new javax.microedition.io.file.FileConnectionImpl(name);
         }
+        if (name.startsWith("sms://") || name.startsWith("mms://") || name.startsWith("cbs://")) {
+            return new javax.wireless.messaging.MessageFactory.Connection(name);
+        }
         throw new ConnectionNotFoundException("unsupported protocol: " + name);
     }
 

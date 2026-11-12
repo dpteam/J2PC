@@ -42,12 +42,16 @@ public final class NameRegistry {
 
     private final Map<String, ClassNames> classes = new HashMap<>();
     private final Map<String, String> methodNames = new HashMap<>();
+    private final Map<String, String> superOf = new HashMap<>();
     private final Set<String> typeNames = new HashSet<>();
 
     /** Assigns the final Java names for every member of every class. */
     public void registerAll(java.util.Collection<ClassFile> all) {
         for (ClassFile cf : all) {
             typeNames.add(Names.simpleName(cf.name()));
+            if (cf.superName() != null) {
+                superOf.put(cf.name(), cf.superName());
+            }
         }
         typeNames.addAll(PLATFORM_TYPES);
 
@@ -135,23 +139,41 @@ public final class NameRegistry {
      * names sanitise to the same identifier, so the declaring class resolves the
      * residual clash. That resolution is per class and therefore never changes the
      * name a supertype or interface chose for the same signature.</p>
+     *
+     * <p>Methods of classes outside the application keep their original name: the
+     * platform is never renamed, and a suffix would break the call.</p>
      */
     public String method(String owner, String name, String desc) {
+        if (owner == null || !classes.containsKey(owner)) {
+            return Names.external(name);
+        }
         boolean isStatic = isStaticMethod(owner, name, desc);
         String key = methodKey(name, desc, isStatic);
         String base = methodNames.get(key);
         if (base == null) {
             return Names.external(name);
         }
+        // Walk up until the declaring class is found, so an inherited method keeps
+        // the name its owner gave it.
+        String current = owner;
+        int guard = 0;
+        while (current != null && guard++ < 64) {
+            ClassNames names = classes.get(current);
+            if (names == null) {
+                break;
+            }
+            String resolved = names.methodNames.get(key);
+            if (resolved != null) {
+                return resolved;
+            }
+            current = superOf.get(current);
+        }
         ClassNames names = classes.get(owner);
         if (names == null) {
             return base;
         }
-        String resolved = names.methodNames.get(key);
-        if (resolved == null) {
-            resolved = names.uniqueMethod(base);
-            names.methodNames.put(key, resolved);
-        }
+        String resolved = names.uniqueMethod(base);
+        names.methodNames.put(key, resolved);
         return resolved;
     }
 
@@ -204,12 +226,25 @@ public final class NameRegistry {
     }
 
     public String field(String owner, String name, String desc) {
-        ClassNames names = classes.get(owner);
-        if (names == null) {
-            return Names.external(name);
+        String key = name + ":" + desc;
+        // Field resolution walks up the hierarchy exactly like the JVM: bytecode may
+        // reference a field through a subclass even though the declaring class is a
+        // superclass, and only the declaring class knows the final name.
+        String current = owner;
+        int guard = 0;
+        while (current != null && guard++ < 64) {
+            ClassNames names = classes.get(current);
+            if (names == null) {
+                // The chain left the application: nothing above was renamed.
+                return Names.external(name);
+            }
+            String mapped = names.field.get(key);
+            if (mapped != null) {
+                return mapped;
+            }
+            current = superOf.get(current);
         }
-        String mapped = names.field.get(name + ":" + desc);
-        return mapped == null ? Names.external(name) : mapped;
+        return Names.external(name);
     }
 
     /**

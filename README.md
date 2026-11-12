@@ -66,9 +66,9 @@ Measured on a private collection of **151 real J2ME applications**:
 | Metric | Value |
 |--------|-------|
 | Recompiled without errors | **151 / 151** |
-| Generated Java compiles | **43 / 151** |
-| Classes emitted for those | 735 |
-| Methods emitted for those | 20 552 |
+| Generated Java compiles | **56 / 151** |
+| Classes emitted for those | 917 |
+| Methods emitted for those | 29 583 |
 
 The gap between the two numbers is dominated by three causes, in order:
 
