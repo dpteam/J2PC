@@ -186,7 +186,7 @@ try {
 | `Monitor` | `monitorenter`/`monitorexit` have no Java syntax |
 | `Sneaky` | rethrow checked exceptions without wrapping |
 | `Box` | primitive ↔ `Object` bridge for merged slots |
-| `Assets` | resource lookup, because a recompiled suite has no JAR |
+| `Assets` | resource lookup, because a recompiled suite has no JAR; roots are relative names resolved against the working directory and the class location, so output stays portable |
 | `Arrays` | reflective `arraylength` when the array type is unknown |
 
 `Monitor` uses identity-based weak buckets. A `HashMap` would be wrong: `Vector` and friends

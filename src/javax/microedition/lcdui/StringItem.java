@@ -32,6 +32,14 @@ public class StringItem extends Item {
         return appearanceMode;
     }
 
+    /** Present in MIDP 2.0; the desktop layer always uses the default font. */
+    public void setFont(Font font) {
+    }
+
+    public Font getFont() {
+        return Font.getDefaultFont();
+    }
+
     @Override
     int height(int width) {
         return Font.getDefaultFont().getHeight() + 4;

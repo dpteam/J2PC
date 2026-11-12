@@ -98,6 +98,31 @@ java -cp "dist/j2pc.jar:build/gen-2048" J2PCLauncher
 The launcher reads `assets/` next to the generated sources, so run it from the project root or
 pass an explicit class path that includes the output directory.
 
+### Where the assets are found
+
+`J2PCLauncher` registers the asset root by a **relative** name (`"assets"`), never an absolute
+path, so the generated project stays portable. At run time `j2pc.rt.Assets` resolves it against:
+
+1. the working directory,
+2. the directory the launcher class was loaded from, and its parents,
+3. as a fallback, a sibling directory of any of those.
+
+That means all of these work without editing anything:
+
+```bash
+# classes compiled next to the sources (assets/ sits beside them)
+javac -d build/out-2048 build/out-2048/**/*.java
+java -cp "dist/j2pc.jar;build/out-2048" J2PCLauncher
+
+# classes compiled into a separate directory
+javac -d build/gen-2048 build/out-2048/**/*.java
+java -cp "dist/j2pc.jar;build/gen-2048" J2PCLauncher
+
+# classes inside a JAR, next to the output directory
+jar cf app.jar -C build/gen-2048 .
+java -cp "dist/j2pc.jar;app.jar" J2PCLauncher
+```
+
 ### Inspecting a class
 
 Two helpers are useful when something looks wrong:

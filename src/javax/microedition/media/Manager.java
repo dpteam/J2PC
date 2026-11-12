@@ -26,4 +26,14 @@ public final class Manager {
         player.setNote(note, duration, volume);
         player.start();
     }
+
+    /** Content types the platform can play; the desktop layer reports its own. */
+    public static String[] getSupportedContentTypes(String protocol) {
+        return new String[]{"audio/x-tone-seq"};
+    }
+
+    /** Protocols this manager understands. */
+    public static String[] getSupportedProtocols(String contentType) {
+        return new String[]{"device"};
+    }
 }

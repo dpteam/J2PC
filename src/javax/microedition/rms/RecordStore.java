@@ -77,8 +77,26 @@ public final class RecordStore {
         return openRecordStore(name, true);
     }
 
-    public static void deleteRecordStore(String recordStoreName) throws RecordStoreException {
-        synchronized (OPEN) {
+    /** Names of every record store that exists on this device. */
+    public static String[] listRecordStores() {
+        Path dir = baseDir();
+        if (!Files.isDirectory(dir)) {
+            return new String[0];
+        }
+        try (java.util.stream.Stream<Path> files = Files.list(dir)) {
+            return files.filter(p -> p.getFileName().toString().endsWith(".rms"))
+                    .map(p -> {
+                        String n = p.getFileName().toString();
+                        return n.substring(0, n.length() - 4);
+                    })
+                    .sorted()
+                    .toArray(String[]::new);
+        } catch (java.io.IOException e) {
+            return new String[0];
+        }
+    }
+
+    public static void deleteRecordStore(String recordStoreName) throws RecordStoreException {        synchronized (OPEN) {
             RecordStore store = OPEN.remove(recordStoreName);
             Path file = baseDir().resolve(sanitize(recordStoreName) + ".rms");
             try {

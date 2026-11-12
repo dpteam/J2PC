@@ -5,6 +5,7 @@ import j2pc.classfile.ClassReader;
 import j2pc.emit.ClassEmitter;
 import j2pc.emit.NameRegistry;
 import j2pc.emit.Names;
+import j2pc.emit.TypeMapper;
 import j2pc.jar.JadFile;
 import j2pc.jar.JarReader;
 import j2pc.util.Log;
@@ -49,6 +50,12 @@ public final class Recompiler {
                 }
                 if (entry.endsWith(".class") && !entry.startsWith("META-INF/")) {
                     byte[] bytes = jar.read(entry);
+                    if (bytes == null || bytes.length < 4 || !hasClassMagic(bytes)) {
+                        // Some suites carry decoy .class entries with no class
+                        // data at all; they are not errors, just noise.
+                        Log.debug("skipping non-class entry %s", entry);
+                        continue;
+                    }
                     try {
                         ClassFile cf = ClassReader.read(bytes);
                         classes.put(cf.name(), cf);
@@ -81,17 +88,22 @@ public final class Recompiler {
         NameRegistry registry = new NameRegistry();
         registry.registerAll(classes.values());
 
+        // Java forbids a packaged class from referring to a class in the unnamed
+        // package, which J2ME suites do all the time. Such classes move into a
+        // synthetic package and every reference is rewritten.
+        TypeMapper types = buildTypeMapper(classes.keySet());
+
         for (ClassFile cf : classes.values()) {
             String internal = cf.name();
             if (opts.onlyPrefix != null && !internal.startsWith(opts.onlyPrefix)) {
                 continue;
             }
-            String pkg = opts.packagePrefix.isEmpty() ? Names.packageName(internal) : opts.packagePrefix;
+            String pkg = opts.packagePrefix.isEmpty() ? types.packageOf(internal) : opts.packagePrefix;
             Path dir = pkg.isEmpty() ? outRoot : outRoot.resolve(pkg.replace('.', '/'));
             Files.createDirectories(dir);
-            Path file = dir.resolve(Names.simpleName(internal) + ".java");
+            Path file = dir.resolve(types.simpleName(internal) + ".java");
             try {
-                String src = new ClassEmitter(cf, opts, registry).emit();
+                String src = new ClassEmitter(cf, opts, registry, types).emit();
                 Files.write(file, src.getBytes(StandardCharsets.UTF_8));
                 Stat st = Stat.of(cf);
                 stats.add(st);
@@ -101,11 +113,14 @@ public final class Recompiler {
                 result.lines += st.lines;
             } catch (RuntimeException e) {
                 Log.error("cannot emit %s: %s", internal, e);
+                if (Log.getLevel() >= Log.DEBUG) {
+                    e.printStackTrace();
+                }
                 result.failedClasses++;
             }
         }
 
-        Path launcher = writeLauncher(outRoot, jad, classes);
+        Path launcher = writeLauncher(outRoot, jad, classes, types);
         result.launcher = launcher;
 
         Path manifest = outRoot.resolve("j2pc-report.txt");
@@ -113,24 +128,62 @@ public final class Recompiler {
         return result;
     }
 
-    private Path writeLauncher(Path outRoot, JadFile jad, Map<String, ClassFile> classes) throws IOException {
+    private static boolean hasClassMagic(byte[] b) {
+        return (b[0] & 0xFF) == 0xCA && (b[1] & 0xFF) == 0xFE
+                && (b[2] & 0xFF) == 0xBA && (b[3] & 0xFF) == 0xBE;
+    }
+
+    /**
+     * Decides which classes have to be moved into a synthetic package.
+     *
+     * <p>Java source cannot mix the two worlds: a class in package {@code p} may
+     * not refer to a class in the unnamed package. As soon as a suite contains
+     * both kinds — a packaged MIDlet next to obfuscated helper classes — the
+     * default-package classes are relocated so the output can compile.</p>
+     */
+    private static TypeMapper buildTypeMapper(java.util.Collection<String> classNames) {
+        TypeMapper mapper = new TypeMapper();
+        boolean hasPackaged = false;
+        boolean hasDefault = false;
+        for (String name : classNames) {
+            if (Names.packageName(name).isEmpty()) {
+                hasDefault = true;
+            } else {
+                hasPackaged = true;
+            }
+        }
+        if (!hasPackaged || !hasDefault) {
+            return mapper;
+        }
+        for (String name : classNames) {
+            if (Names.packageName(name).isEmpty()) {
+                mapper.rename(name, TypeMapper.UNPACKAGED + "/" + Names.simpleName(name));
+            }
+        }
+        Log.info("moving %d default-package classes into %s",
+                mapper.renamedCount(), TypeMapper.UNPACKAGED);
+        return mapper;
+    }
+
+    private Path writeLauncher(Path outRoot, JadFile jad, Map<String, ClassFile> classes,
+                               TypeMapper types) throws IOException {
         String midletClass = null;
         String name = "J2ME Application";
         String vendor = "unknown";
         String version = "1.0";
-        Path assets = outRoot.resolve("assets").toAbsolutePath();
-        String assetsDir = assets.toString().replace('\\', '/');
         if (jad != null) {
             name = jad.midletName();
             vendor = jad.vendor();
             version = jad.version();
             List<JadFile.MidletEntry> entries = jad.midlets();
-            if (!entries.isEmpty()) {
-                midletClass = entries.get(0).className;
+            if (!entries.isEmpty() && entries.get(0).className != null) {
+                // The JAD names the class as it was in the suite; a relocated
+                // class has to be referenced by its new name.
+                midletClass = types.qualified(entries.get(0).className.replace('.', '/'));
             }
         }
         if (midletClass == null) {
-            midletClass = guessMidlet(classes);
+            midletClass = guessMidlet(classes, types);
         }
 
         StringBuilder sb = new StringBuilder();
@@ -139,9 +192,10 @@ public final class Recompiler {
         sb.append("/** Desktop entry point for \"").append(name).append("\". */\n");
         sb.append("public final class J2PCLauncher {\n");
         sb.append("    public static void main(String[] args) throws Exception {\n");
-        sb.append("        // Resources of the original suite live in a plain directory.\n");
-        sb.append("        j2pc.rt.Assets.addRoot(java.nio.file.Path.of(")
-                .append(assetsDir == null ? "\"assets\"" : "\"" + escape(assetsDir) + "\"").append("));\n");
+        sb.append("        // Resources of the original suite live in a plain directory. The path is\n");
+        sb.append("        // relative so that the output stays portable: it is resolved against the\n");
+        sb.append("        // working directory, the location of this class, and their parents.\n");
+        sb.append("        j2pc.rt.Assets.addRoot(\"assets\");\n");
         sb.append("        String cls = args.length > 0 ? args[0] : ")
                 .append(midletClass == null ? "null" : "\"" + midletClass + "\"").append(";\n");
         sb.append("        if (cls == null) {\n");
@@ -163,13 +217,13 @@ public final class Recompiler {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private String guessMidlet(Map<String, ClassFile> classes) {
+    private String guessMidlet(Map<String, ClassFile> classes, TypeMapper types) {
         String best = null;
         for (ClassFile cf : classes.values()) {
             String sup = cf.superName();
             if (sup != null && sup.equals("javax/microedition/midlet/MIDlet")) {
                 if (best == null || cf.name().length() < best.length()) {
-                    best = cf.name().replace('/', '.');
+                    best = types.qualified(cf.name());
                 }
             }
         }

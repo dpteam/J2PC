@@ -7,13 +7,13 @@ a missing feature.
 
 | Feature | Effect |
 |---------|--------|
-| `invokedynamic` | the method gets a stub that throws `UnsupportedOperationException` and a warning is logged |
 | `jsr`/`ret` (old `finally` encoding) | handled, but such methods are forced into dispatch mode and read poorly |
 | Methods without `Code` | abstract/native methods are emitted as declarations, others as throwing stubs |
+| Exotic `invokedynamic` bootstraps | only `StringConcatFactory` and `LambdaMetafactory` are translated; anything else becomes a stub that throws when reached |
 
-`invokedynamic` is practically absent from J2ME suites (CLDC 1.0/1.1 predates Java 7), so this
-rarely matters in practice. If it appears, the class still compiles; only that one method
-throws.
+`invokedynamic` from modern compilers is supported: string concatenation is rebuilt as a `+`
+expression and lambdas become anonymous classes. J2ME suites predate the opcode entirely, so
+this only matters when recompiling code built with a recent toolchain.
 
 ## Readability
 
@@ -39,7 +39,12 @@ The analysis is a standard forward abstract interpretation over the operand stac
 * prove array element types across method calls.
 
 When a slot's type cannot be proven, the emitter falls back to `Object` plus boxing helpers, or
-to a reflective `arraylength`. This is correct but produces extra casts and boxes.
+to reflective `arraylength`/array access. This is correct but produces extra casts and boxes.
+
+The practical consequence is the biggest remaining source of *compile* failures on heavily
+obfuscated code: a slot reused for unrelated types can leave an expression typed `Object`
+where the surrounding statement needs a specific array or interface. The generated code is
+still faithful — it just does not type-check until the analysis is strengthened.
 
 ## Platform coverage
 
@@ -106,3 +111,27 @@ Some things that look like limitations are deliberate:
 * **No reconstruction of the original sources.** The output is equivalent Java, not the
   author's Java. Comments, formatting and structure are gone.
 * **The dispatch loop.** It looks unusual, but it is the reason the output is exact.
+* **Widened visibility.** Fields and methods are emitted `public`. Java 11+ nest access lets
+  bytecode touch private members across classes; that relationship is gone after a round trip,
+  so the modifiers have to be relaxed. Nothing outside the class can observe the difference.
+* **No `final`.** Bytecode assigns `static final` fields from `<clinit>` and instance finals
+  from constructors. Both bodies become dispatch loops, so javac can no longer prove the
+  single-assignment rule. Dropping the modifier changes nothing observable.
+* **Relocated default-package classes.** When a suite mixes packaged and unpackaged classes,
+  the latter move into a synthetic `unpackaged` package, because Java forbids the reference
+  the other way round.
+
+## Corpus reality check
+
+On a private collection of 151 applications, all 151 recompile and 27 produce Java that
+compiles. The rest fail on **missing APIs**, not on wrong translation:
+
+| Missing | Applications |
+|---------|--------------|
+| `javax.microedition.m3g` (3D engine) | 12 |
+| `com.mascotcapsule.micro3d.v3` (3D engine) | ~8 |
+| `javax.microedition.pim` | ~4 |
+| `javax.wireless.messaging` | ~2 |
+| vendor extensions (`com.siemens`, `com.motorola`, …) | remainder |
+
+Implementing a 3D engine is a separate project; the 2D platform is what this tool targets.

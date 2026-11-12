@@ -15,7 +15,10 @@ if not exist "%CLASSES%" mkdir "%CLASSES%"
 if not exist "%DIST%" mkdir "%DIST%"
 
 echo [1/3] Compiling sources...
-dir /s /b src\*.java > build\sources.txt
+rem The synthetic test suite under src\test is not part of the tool.
+dir /s /b src\j2pc\*.java > build\sources.txt
+dir /s /b src\javax\*.java >> build\sources.txt
+dir /s /b src\com\*.java >> build\sources.txt
 javac -encoding UTF-8 -d "%CLASSES%" @build\sources.txt
 if errorlevel 1 goto :fail
 

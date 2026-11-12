@@ -137,6 +137,18 @@ public final class ConstantPool {
         return ref == null ? 0 : ref[1];
     }
 
+    /** Bootstrap method index of a {@code DYNAMIC}/{@code INVOKE_DYNAMIC} entry. */
+    public int bootstrapIndex(int dynamicIndex) {
+        int[] ref = ref(dynamicIndex);
+        return ref == null ? -1 : ref[0];
+    }
+
+    /** Descriptor stored in a {@code METHOD_TYPE} entry. */
+    public String methodTypeDescriptor(int index) {
+        Object v = value(index);
+        return v instanceof Integer ? utf8((Integer) v) : null;
+    }
+
     private int[] ref(int index) {
         Object v = value(index);
         return v instanceof int[] ? (int[]) v : null;

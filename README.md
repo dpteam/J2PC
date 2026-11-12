@@ -47,17 +47,47 @@ survives the trip unchanged.
 | Area | State |
 |------|-------|
 | Class file parsing (up to Java 21) | done |
-| Bytecode decoding (all opcodes except `invokedynamic`) | done |
+| Bytecode decoding (all opcodes) | done |
 | Typed data-flow analysis (stack + locals) | done |
 | Java source emission (dispatch-loop recompiler) | done |
-| MIDP 2.0 emulation (`lcdui`, `lcdui.game`, `rms`, `io`, `media`) | partial, enough for games |
+| `invokedynamic` (string concat, lambdas, method refs) | done |
+| Enums, interfaces with constants, inner/anonymous classes | done |
+| MIDP 2.0 emulation (`lcdui`, `lcdui.game`, `rms`, `io`, `media`) | partial, enough for 2D games |
+| Nokia UI API (`FullCanvas`, `DirectGraphics`, `DeviceControl`) | partial |
+| Bluetooth (`javax.bluetooth`) | stubs: the API compiles, there is no radio |
 | Launcher + asset loading | done |
 | CLI | done |
 | TUI / GUI | planned |
 
-Verified against real applications: **Tetris** (draws and plays), **2048** (draws, moves,
-merges tiles, keeps score), **Alchemic**, **Garfield 2** — all recompile and the generated
-Java compiles without errors.
+### Corpus results
+
+Measured on a private collection of **151 real J2ME applications**:
+
+| Metric | Value |
+|--------|-------|
+| Recompiled without errors | **151 / 151** |
+| Generated Java compiles | **27 / 151** |
+| Classes emitted for those | 407 |
+| Methods emitted for those | 10 759 |
+
+The gap between the two numbers is dominated by three causes, in order:
+
+1. **Missing platform APIs** — `javax.microedition.m3g` (3D), `com.mascotcapsule.micro3d.v3`
+   (3D), `javax.microedition.pim`, `javax.wireless.messaging`. Twelve applications need a 3D
+   engine alone.
+2. **Vendor extensions** — `com.nokia`, `com.siemens`, `com.motorola` variants beyond the
+   implemented subset.
+3. **Type fidelity in obfuscated code** — a slot reused for unrelated types can leave the
+   emitter with an `Object` where a specific array or interface is required.
+
+Every one of those is a missing feature, not a wrong translation: the recompiler never
+produces code that silently behaves differently, and `tools/verify.sh` checks exactly that on
+the synthetic suite.
+
+Verified end to end — recompiled, compiled **and played**:
+
+* **2048** — full gameplay: rendering, tile movement, merging, scoring
+* **Tetris** — rendering, keyboard input, falling pieces, next-piece preview
 
 ## Requirements
 
@@ -183,12 +213,29 @@ so games draw the way they did on a handset.
 ## Tests
 
 ```bash
-test.cmd            # Windows
-test.cmd D:\path\to\j2me\jars
+# self test: builds a synthetic MIDlet suite, recompiles it, compiles the result
+tools/selftest.sh          # or tools\selftest.cmd on Windows
+
+# behavioural equivalence: runs the original and the recompiled classes and diffs them
+tools/verify.sh            # or tools\verify.cmd
+
+# sample corpus: every JAR in samples/
+test.sh                    # or test.cmd
 ```
 
-The runner recompiles every JAR in `samples/`, compiles the generated Java against the J2PC
-runtime and reports pass/fail per application.
+The self test needs no third-party files: `src/test` contains a synthetic MIDlet suite that
+exercises every opcode family, `invokedynamic`, enums, inner classes and exception handlers.
+
+`tools/verify.sh` is the important one. It calls `j2pc.tools.Verifier` against the original
+classes and against the recompiled ones and compares the output, so a translation that compiles
+but behaves differently is caught.
+
+For the full corpus there is a batch runner:
+
+```powershell
+powershell -File tools/batch.ps1 -Compile          # recompile + compile every JAR in the folder
+powershell -File tools/errors.ps1                  # group the failures by cause
+```
 
 ## Project layout
 
@@ -204,8 +251,11 @@ src/j2pc/
   Main.java      CLI entry point
   Recompiler.java orchestration
 src/javax/microedition/   MIDP emulation
+src/com/nokia/            Nokia UI API emulation (FullCanvas, DirectGraphics)
+src/test/synthetic/       synthetic MIDlet suite used by the self test
 docs/                     architecture, design notes, roadmap
-samples/                  small JARs used by the test runner
+samples/                  small JARs used by the corpus runner
+tools/                    batch runner, self test, verifier, error taxonomy
 ```
 
 ## Documentation
@@ -213,6 +263,8 @@ samples/                  small JARs used by the test runner
 * [docs/architecture.md](docs/architecture.md) — how the pipeline fits together
 * [docs/bytecode-to-java.md](docs/bytecode-to-java.md) — translation rules, opcode by opcode
 * [docs/limitations.md](docs/limitations.md) — what does not work yet
+* [docs/deobfuscation.md](docs/deobfuscation.md) — detection and structural rewrites
+* [docs/ci.md](docs/ci.md) — workflows, artifacts, how to reproduce CI locally
 * [docs/roadmap.md](docs/roadmap.md) — TUI, GUI, further work
 * [docs/building.md](docs/building.md) — build and test details
 

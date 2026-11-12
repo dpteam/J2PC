@@ -64,6 +64,13 @@ public abstract class Displayable {
         this.listener = l;
     }
 
+    /** The command invoked when the user presses the primary soft key. */
+    public void setDefaultCommand(Command cmd) {
+        this.defaultCommand = cmd;
+    }
+
+    private Command defaultCommand;
+
     public CommandListener getCommandListener() {
         return listener;
     }

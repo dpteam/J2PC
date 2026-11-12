@@ -21,4 +21,19 @@ public final class Arrays {
         }
         return Array.getLength(array);
     }
+
+    public static Object get(Object array, int index) {
+        if (array == null) {
+            throw new NullPointerException("array load on null");
+        }
+        return Array.get(array, index);
+    }
+
+    /** Reflective store, used when the element type could not be proven. */
+    public static void set(Object array, int index, Object value) {
+        if (array == null) {
+            throw new NullPointerException("array store on null");
+        }
+        Array.set(array, index, value);
+    }
 }

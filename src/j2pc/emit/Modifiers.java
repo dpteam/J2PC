@@ -23,16 +23,17 @@ public final class Modifiers {
         return sb.toString().trim();
     }
 
+    /**
+     * Fields are always emitted {@code public}.
+     *
+     * <p>Java 11+ lets a nest access private members of its host directly, and
+     * javac relies on that for inner classes. Bytecode therefore contains plain
+     * {@code getfield}/{@code putfield} on private fields of another class. Once
+     * the code is recompiled, that nest relationship is gone, so the visibility
+     * has to be widened — otherwise the generated source would not compile.</p>
+     */
     public static String forField(int access, Options opts) {
-        StringBuilder sb = new StringBuilder();
-        int vis = access & (ClassFile.ACC_PUBLIC | ClassFile.ACC_PRIVATE | ClassFile.ACC_PROTECTED);
-        if (vis == ClassFile.ACC_PRIVATE) {
-            sb.append("private ");
-        } else if (vis == ClassFile.ACC_PROTECTED) {
-            sb.append("protected ");
-        } else {
-            sb.append("public ");
-        }
+        StringBuilder sb = new StringBuilder("public ");
         if ((access & ClassFile.ACC_STATIC) != 0) {
             sb.append("static ");
         }
@@ -46,43 +47,46 @@ public final class Modifiers {
     }
 
     /**
-     * {@code final} is only kept for static constants: an instance field that a
-     * constructor assigns cannot stay final once the body is expressed as a
-     * dispatch loop.
+     * Fields are never {@code final} in the output.
+     *
+     * <p>Bytecode assigns {@code static final} fields from {@code <clinit>}, and
+     * instance finals from constructors. Since both bodies are recompiled as
+     * dispatch loops, javac can no longer prove the single-assignment rule and
+     * rejects the class. Dropping the modifier keeps the behaviour identical —
+     * nothing outside the class could observe finality anyway.</p>
      */
     public static String fieldFinal(int access, boolean hasConstantValue) {
-        return ((access & ClassFile.ACC_STATIC) != 0 && hasConstantValue) ? "final " : "";
+        return "";
     }
 
     public static String forMethod(int access, boolean inInterface, Options opts) {
         StringBuilder sb = new StringBuilder();
-        int vis = access & (ClassFile.ACC_PUBLIC | ClassFile.ACC_PRIVATE | ClassFile.ACC_PROTECTED);
         if (inInterface) {
-            if ((access & ClassFile.ACC_STATIC) != 0 || (access & ClassFile.ACC_ABSTRACT) == 0) {
+            boolean isStatic = (access & ClassFile.ACC_STATIC) != 0;
+            boolean isAbstract = (access & ClassFile.ACC_ABSTRACT) != 0;
+            if (isStatic) {
+                // A static method in an interface is neither default nor abstract.
+                sb.append("static ");
+            } else if (!isAbstract) {
+                // A concrete instance method in an interface must be declared default.
                 sb.append("default ");
             }
         } else {
-            if (vis == 0) {
-                sb.append("public ");
-            } else if (vis == ClassFile.ACC_PUBLIC) {
-                sb.append("public ");
-            } else if (vis == ClassFile.ACC_PRIVATE) {
-                sb.append("private ");
-            } else if (vis == ClassFile.ACC_PROTECTED) {
-                sb.append("protected ");
-            } else {
-                sb.append("public ");
-            }
+            // Every method is emitted public. Bytecode happily narrows access in a
+            // subclass or widens it in a superclass, and it reaches private members
+            // through nest access, neither of which survives a round trip through
+            // source. Widening is invisible to behaviour and keeps overrides legal.
+            sb.append("public ");
         }
-        if ((access & ClassFile.ACC_STATIC) != 0) {
+        if ((access & ClassFile.ACC_STATIC) != 0 && !inInterface) {
             sb.append("static ");
         }
         if ((access & ClassFile.ACC_ABSTRACT) != 0 && !inInterface) {
             sb.append("abstract ");
         }
-        if ((access & ClassFile.ACC_FINAL) != 0) {
-            sb.append("final ");
-        }
+        // `final` is dropped: a final static method may not be hidden by a
+        // subclass, and a final instance method may not be overridden, both of
+        // which happen in bytecode that was compiled without those constraints.
         if ((access & ClassFile.ACC_SYNCHRONIZED) != 0) {
             sb.append("synchronized ");
         }

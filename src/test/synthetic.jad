@@ -1,0 +1,7 @@
+MIDlet-Name: J2PC Synthetic Suite
+MIDlet-Vendor: J2PC
+MIDlet-Version: 1.0.0
+MIDlet-1: Synthetic, , synthetic.SyntheticMidlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0
+MIDlet-Jar-URL: synthetic.jar

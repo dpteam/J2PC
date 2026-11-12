@@ -17,7 +17,7 @@ import java.awt.image.BufferedImage;
  * origin, {@link #clipRect} intersects the clip, and drawing is clipped to the
  * target image or the visible part of a canvas.</p>
  */
-public final class Graphics {
+public final class Graphics implements com.nokia.mid.ui.DirectGraphics {
 
     public static final int HCENTER = 1;
     public static final int VCENTER = 2;
@@ -255,12 +255,20 @@ public final class Graphics {
     }
 
     public void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3) {
+        fillTriangle(x1, y1, x2, y2, x3, y3, getColor() | 0xFF000000);
+    }
+
+    /** Vendor variant with an explicit colour, from the Nokia extension. */
+    public void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3, int argbColor) {
+        java.awt.Color saved = g.getColor();
+        g.setColor(new java.awt.Color(argbColor & 0xFFFFFF));
         GeneralPath p = new GeneralPath();
         p.moveTo(x1 + translateX, y1 + translateY);
         p.lineTo(x2 + translateX, y2 + translateY);
         p.lineTo(x3 + translateX, y3 + translateY);
         p.closePath();
         g.fill(p);
+        g.setColor(saved);
     }
 
     // ------------------------------------------------------------------ image
@@ -410,6 +418,181 @@ public final class Graphics {
         cg.drawImage(target, -sx, -sy, null);
         cg.dispose();
         g.drawImage(copy, dx, dy, null);
+    }
+
+    // ------------------------------------------- Nokia DirectGraphics bridge
+
+    private int argbColor = 0xFF000000;
+
+    @Override
+    public void drawImage(Image img, int x, int y, int anchor, int manipulation) {
+        if (img == null) {
+            throw new NullPointerException("image");
+        }
+        int dx = x;
+        int dy = y;
+        int w = img.getWidth();
+        int h = img.getHeight();
+        boolean rotate = (manipulation & (ROTATE_90 | ROTATE_180 | ROTATE_270)) != 0;
+        if (rotate) {
+            int t = w;
+            w = h;
+            h = t;
+        }
+        if ((anchor & HCENTER) != 0) {
+            dx -= w / 2;
+        } else if ((anchor & RIGHT) != 0) {
+            dx -= w;
+        }
+        if ((anchor & VCENTER) != 0) {
+            dy -= h / 2;
+        } else if ((anchor & BOTTOM) != 0) {
+            dy -= h;
+        }
+        int transform = 0;
+        if ((manipulation & FLIP_HORIZONTAL) != 0) {
+            transform |= 2;
+        }
+        if ((manipulation & FLIP_VERTICAL) != 0) {
+            transform |= 1;
+        }
+        if ((manipulation & ROTATE_90) != 0) {
+            transform = 5;
+        } else if ((manipulation & ROTATE_180) != 0) {
+            transform = 3;
+        } else if ((manipulation & ROTATE_270) != 0) {
+            transform = 6;
+        }
+        drawRegion(img, 0, 0, img.getWidth(), img.getHeight(), transform, dx, dy,
+                Graphics.TOP | Graphics.LEFT);
+    }
+
+    @Override
+    public void drawRoundRect(int x, int y, int width, int height, int arcWidth, int arcHeight,
+                              int arcThickness) {
+        drawRoundRect(x, y, width, height, arcWidth, arcHeight);
+    }
+
+    @Override
+    public void drawPolygon(int[] xPoints, int xOffset, int[] yPoints, int yOffset, int nPoints,
+                            int argbColor) {
+        java.awt.Color saved = g.getColor();
+        g.setColor(new java.awt.Color(argbColor & 0xFFFFFF));
+        for (int i = 0; i < nPoints; i++) {
+            int j = (i + 1) % nPoints;
+            g.drawLine(xPoints[xOffset + i] + translateX, yPoints[yOffset + i] + translateY,
+                    xPoints[xOffset + j] + translateX, yPoints[yOffset + j] + translateY);
+        }
+        g.setColor(saved);
+    }
+
+    @Override
+    public void fillPolygon(int[] xPoints, int xOffset, int[] yPoints, int yOffset, int nPoints,
+                            int argbColor) {
+        java.awt.Color saved = g.getColor();
+        g.setColor(new java.awt.Color(argbColor & 0xFFFFFF));
+        java.awt.Polygon p = new java.awt.Polygon();
+        for (int i = 0; i < nPoints; i++) {
+            p.addPoint(xPoints[xOffset + i] + translateX, yPoints[yOffset + i] + translateY);
+        }
+        g.fill(p);
+        g.setColor(saved);
+    }
+
+    @Override
+    public void drawLine(int x1, int y1, int x2, int y2, int argbColor) {
+        java.awt.Color saved = g.getColor();
+        g.setColor(new java.awt.Color(argbColor & 0xFFFFFF));
+        drawLine(x1, y1, x2, y2);
+        g.setColor(saved);
+    }
+
+    @Override
+    public void fillRect(int x, int y, int width, int height, int argbColor) {
+        java.awt.Color saved = g.getColor();
+        g.setColor(new java.awt.Color(argbColor & 0xFFFFFF));
+        fillRect(x, y, width, height);
+        g.setColor(saved);
+    }
+
+    @Override
+    public void getRGB(int[] rgbData, int offset, int scanlength, int x, int y, int width,
+                       int height, int manipulation) {
+        if (target == null) {
+            return;
+        }
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int px = x + col + translateX;
+                int py = y + row + translateY;
+                int value = 0;
+                if (px >= 0 && py >= 0 && px < target.getWidth() && py < target.getHeight()) {
+                    value = target.getRGB(px, py);
+                }
+                rgbData[offset + row * scanlength + col] = value;
+            }
+        }
+    }
+
+    @Override
+    public void drawRGB(int[] rgbData, int offset, int scanlength, int x, int y, int width,
+                        int height, boolean processAlpha) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        java.awt.image.BufferedImage tmp = new java.awt.image.BufferedImage(
+                width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int value = rgbData[offset + row * scanlength + col];
+                if (!processAlpha) {
+                    value |= 0xFF000000;
+                }
+                tmp.setRGB(col, row, value);
+            }
+        }
+        g.drawImage(tmp, x + translateX, y + translateY, null);
+    }
+
+    @Override
+    public int getAlphaComponent() {
+        return (argbColor >>> 24) & 0xFF;
+    }
+
+    @Override
+    public void setARGBColor(int argbColor) {
+        this.argbColor = argbColor;
+        setColor(argbColor & 0xFFFFFF);
+    }
+
+    @Override
+    public int getNativePixelFormat() {
+        return TYPE_INT_8888_ARGB;
+    }
+
+    @Override
+    public Graphics getGraphics() {
+        return this;
+    }
+
+    @Override
+    public int getDisplayColor(int color) {
+        return color & 0xFFFFFF;
+    }
+
+    @Override
+    public int blend(int source, int destination, int alpha) {
+        int a = alpha & 0xFF;
+        int sr = (source >> 16) & 0xFF;
+        int sg = (source >> 8) & 0xFF;
+        int sb = source & 0xFF;
+        int dr = (destination >> 16) & 0xFF;
+        int dg = (destination >> 8) & 0xFF;
+        int db = destination & 0xFF;
+        int r = (sr * a + dr * (255 - a)) / 255;
+        int g2 = (sg * a + dg * (255 - a)) / 255;
+        int b = (sb * a + db * (255 - a)) / 255;
+        return (r << 16) | (g2 << 8) | b;
     }
 
     /** Creates a fresh copy of this context sharing the same target. */

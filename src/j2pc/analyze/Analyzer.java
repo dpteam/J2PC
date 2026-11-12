@@ -624,8 +624,20 @@ public final class Analyzer {
                 }
                 return flow(next);
             }
-            case O.INVOKEDYNAMIC:
-                throw new IllegalStateException("invokedynamic is not supported");
+            case O.INVOKEDYNAMIC: {
+                String desc = cp.refType(ins.operand(0));
+                if (desc == null) {
+                    desc = "()V";
+                }
+                for (int i = 0; i < Descriptor.args(desc).length; i++) {
+                    f.pop();
+                }
+                String ret = Descriptor.returnType(desc);
+                if (!"V".equals(ret)) {
+                    f.push(descriptorType(ret));
+                }
+                return flow(next);
+            }
 
             case O.NEW:
                 f.push(SlotType.ref(cp.className(ins.operand(0))));

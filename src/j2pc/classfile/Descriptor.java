@@ -97,10 +97,32 @@ public final class Descriptor {
             case '[':
                 return javaType(elementType(typeDesc)) + "[]";
             case 'L':
-                return typeDesc.substring(1, typeDesc.length() - 1).replace('/', '.').replace('$', '$');
+                return platformType(typeDesc.substring(1, typeDesc.length() - 1));
             default:
                 return "java.lang.Object";
         }
+    }
+
+    /**
+     * Converts an internal name into a source-level type name.
+     *
+     * <p>Nested classes of the platform are separate class files ({@code java/util/Map$Entry})
+     * but are written as {@code java.util.Map.Entry} in source. Application classes keep their
+     * {@code $} because they are emitted as top-level files with that exact name.</p>
+     */
+    public static String platformType(String internalName) {
+        String dotted = internalName.replace('/', '.');
+        if (isPlatformPackage(dotted)) {
+            return dotted.replace('$', '.');
+        }
+        return dotted;
+    }
+
+    private static boolean isPlatformPackage(String dotted) {
+        return dotted.startsWith("java.") || dotted.startsWith("javax.")
+                || dotted.startsWith("jdk.") || dotted.startsWith("sun.")
+                || dotted.startsWith("com.sun.") || dotted.startsWith("org.w3c.")
+                || dotted.startsWith("org.xml.");
     }
 
     /** Boxed Java type used when a primitive has to live in an Object slot. */

@@ -19,6 +19,14 @@ provides the block graph, dominance and frames.
 
 ### 2. Deobfuscation hints
 
+See [deobfuscation.md](deobfuscation.md) for the full design. In short, four tiers:
+
+1. **detection** — measure name shape, debug info, structure, strings and control flow; report a
+   per-signal score and a verdict,
+2. **structural rewrites** — recover `synchronized`, string concatenation, `for` loops,
+3. **naming hints** — rename only when the class hierarchy proves the role,
+4. **string decryption** — execute the suite's own decryptor in a sandbox at recompile time.
+
 Not renaming (that needs semantics), but *labelling*:
 
 * detect synthetic accessors (`access$000`) and mark them,
@@ -32,7 +40,6 @@ Each of these is a local rewrite on the instruction stream, safe because the pat
 recognised structurally.
 
 ### 3. TUI
-
 A terminal UI for people who live in a terminal:
 
 * file picker for JAR/JAD,
@@ -85,7 +92,8 @@ Each is a small adapter over the existing emulation layer.
 ### 7. Verification
 
 * **Round-trip tests.** Compile a set of Java sources, recompile them, and compare behaviour on
-  a corpus of inputs.
+  a corpus of inputs. *(Started: `tools/verify.sh` and `j2pc.tools.Verifier` already do this for
+  the synthetic suite.)*
 * **Differential testing.** Run the original class and the recompiled class side by side on
   random inputs and compare results.
 * **Bytecode-level checks.** Assert that every instruction of the input maps to at least one
@@ -95,7 +103,8 @@ Each is a small adapter over the existing emulation layer.
 
 * one-file executable via `jlink`/`jpackage`,
 * a `j2pc` wrapper script that builds and runs in one step,
-* GitHub Actions: build, run the sample corpus, publish the report.
+* GitHub Actions: build, run the sample corpus, publish the report. *(Done: see
+  [ci.md](ci.md).)*
 
 ### 9. Quality of life
 

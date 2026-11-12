@@ -49,6 +49,7 @@ public final class MethodEmitter {
     private final ConstantPool cp;
     private final Options opts;
     private final NameRegistry names;
+    private final TypeMapper types;
 
     private final SourceWriter out = new SourceWriter("    ");
 
@@ -59,7 +60,8 @@ public final class MethodEmitter {
 
     private final List<Val> stack = new ArrayList<>();
     private final Map<String, String> varNames = new HashMap<>();
-    private final Set<String> declared = new HashSet<>();
+    /** Local slots that currently alias an uninitialised {@code new} temporary. */
+    private final Map<Integer, Val> freshLocals = new HashMap<>();    private final Set<String> declared = new HashSet<>();
     private final Map<Integer, Set<Integer>> localKinds = new HashMap<>();
     private final List<String> declarations = new ArrayList<>();
 
@@ -73,17 +75,20 @@ public final class MethodEmitter {
     private int condSeq;
     private Map<Integer, Integer> lineAt;
 
-    private MethodEmitter(ClassFile cf, ClassFile.Member method, Options opts, NameRegistry names) {
+    private MethodEmitter(ClassFile cf, ClassFile.Member method, Options opts, NameRegistry names,
+                          TypeMapper types) {
         this.cf = cf;
         this.method = method;
         this.code = method.code();
         this.cp = cf.cp;
         this.opts = opts;
         this.names = names;
+        this.types = types;
     }
 
-    public static String emit(ClassFile cf, ClassFile.Member method, Options opts, NameRegistry names) {
-        return new MethodEmitter(cf, method, opts, names).run();
+    public static String emit(ClassFile cf, ClassFile.Member method, Options opts,
+                                     NameRegistry names, TypeMapper types) {
+        return new MethodEmitter(cf, method, opts, names, types).run();
     }
 
     // ------------------------------------------------------------------ entry
@@ -121,6 +126,8 @@ public final class MethodEmitter {
             // constructor, so the mandatory chain is emitted before anything
             // else, including the local declarations.
             prologueMode = true;
+            java.util.List<String> prologueLines = new ArrayList<>();
+            out.captureTo(prologueLines);
             for (Instruction ins : insns) {
                 if (ins.pc >= loopStart) {
                     break;
@@ -131,8 +138,9 @@ public final class MethodEmitter {
                 emitLineComment(ins.pc);
                 exec(ins);
             }
+            out.stopCapture();
             prologueMode = false;
-            prologue = out.drain();
+            prologue = reorderSuperFirst(prologueLines);
         }
 
         if (flat) {
@@ -160,6 +168,35 @@ public final class MethodEmitter {
         sb.append("throw j2pc.rt.Sneaky.sneak(__unchecked);\n");
         sb.append("}\n");
         sb.append('}');
+        return sb.toString();
+    }
+
+    /**
+     * Java requires {@code super(...)} or {@code this(...)} to be the first
+     * statement of a constructor, but the JVM allows work before it — inner
+     * classes assign their synthetic {@code this$0} field first, for example.
+     *
+     * <p>The call is therefore moved to the front. That is safe when it takes no
+     * arguments: nothing can observe the object before {@code super()} returns,
+     * because every instance method needs the object to be constructed.</p>
+     */
+    private static String reorderSuperFirst(java.util.List<String> lines) {
+        int callIndex = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            String t = lines.get(i).trim();
+            if (t.equals("super();") || t.equals("this();")) {
+                callIndex = i;
+                break;
+            }
+        }
+        if (callIndex > 0) {
+            String call = lines.remove(callIndex);
+            lines.add(0, call);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            sb.append(line).append('\n');
+        }
         return sb.toString();
     }
 
@@ -195,9 +232,9 @@ public final class MethodEmitter {
             return "static";
         }
         if ("<init>".equals(name)) {
-            sb.append(Names.simpleName(cf.name())).append('(');
+            sb.append(types.simpleName(cf.name())).append('(');
         } else {
-            sb.append(Descriptor.javaType(Descriptor.returnType(method.desc())))
+            sb.append(types.ref(Descriptor.returnType(method.desc())))
                     .append(' ').append(names.method(cf.name(), name, method.desc())).append('(');
         }
         String[] args = Descriptor.args(method.desc());
@@ -205,7 +242,7 @@ public final class MethodEmitter {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(Descriptor.javaType(args[i]))
+            sb.append(types.ref(args[i]))
                     .append(' ').append(argName(i, args[i]));        }
         sb.append(')');
         if ("<init>".equals(method.name()) && prologueNeedsThrows) {
@@ -492,7 +529,7 @@ public final class MethodEmitter {
         stack.clear();
         for (int i = 0; i < frame.sp; i++) {
             SlotType declaredType = analysis.stackDecl[i];
-            declare("s" + i, declaredType.javaType(), declaredType.defaultLiteral());
+            declare("s" + i, javaType(declaredType), declaredType.defaultLiteral());
             // The variable holds the merged type, but the block knows a more
             // precise one; coerce() inserts the cast where it is needed.
             SlotType precise = frame.stack[i] == null ? declaredType : frame.stack[i];
@@ -541,9 +578,9 @@ public final class MethodEmitter {
             ClassFile.Handler h = wrapping.get(handlerIndex - i);
             out.outdent();
             String exType = h.catchType == 0 ? "java.lang.Throwable"
-                    : Descriptor.javaType("L" + cp.className(h.catchType) + ";");
+                    : types.refInternal(cp.className(h.catchType));
             SlotType st = analysis.stackDecl.length > 0 ? analysis.stackDecl[0] : SlotType.THROWABLE_T;
-            declare("s0", st.javaType(), st.defaultLiteral());
+            declare("s0", javaType(st), st.defaultLiteral());
             out.line("} catch (java.lang.Throwable __ex) {");
             out.indent();
             if (h.catchType != 0) {
@@ -664,7 +701,7 @@ public final class MethodEmitter {
             return v;
         }
         String nm = "__a" + (tempSeq++);
-        declare(nm, v.type.javaType(), v.type.defaultLiteral());
+        declare(nm, javaType(v.type), v.type.defaultLiteral());
         out.line(nm + " = " + v.code + ";");
         return new Val(nm, v.type, v.freshNew);
     }
@@ -713,7 +750,7 @@ public final class MethodEmitter {
         for (int i = 0; i < stack.size(); i++) {
             Val v = stack.get(i);
             SlotType decl = analysis.stackDecl[i];
-            declare("s" + i, decl.javaType(), decl.defaultLiteral());
+            declare("s" + i, javaType(decl), decl.defaultLiteral());
             String value = coerce(v, decl);
             if (!value.equals("s" + i)) {
                 out.line("s" + i + " = " + value + ";");
@@ -768,7 +805,7 @@ public final class MethodEmitter {
                 case SlotType.DOUBLE:
                     return "j2pc.rt.Box.toDouble(" + c + ")";
                 case SlotType.REF:
-                    return "(" + target.javaType() + ")(" + c + ")";
+                    return "(" + javaType(target) + ")(" + c + ")";
                 default:
                     return c;
             }
@@ -820,8 +857,17 @@ public final class MethodEmitter {
                 }
             case SlotType.REF:
                 if (v.type.kind == SlotType.REF) {
-                    if (target.desc != null && v.type.desc != null && !target.desc.equals(v.type.desc)) {
-                        return "(" + target.javaType() + ")(" + c + ")";
+                    if (target.desc == null) {
+                        return c;
+                    }
+                    if (v.type.desc == null) {
+                        // A null literal still needs the explicit type when the
+                        // target is more specific than Object.
+                        return "java.lang.Object".equals(javaType(target))
+                                ? c : "((" + javaType(target) + ")(" + c + "))";
+                    }
+                    if (!target.desc.equals(v.type.desc)) {
+                        return "((" + javaType(target) + ")(" + c + "))";
                     }
                     return c;
                 }
@@ -921,10 +967,16 @@ public final class MethodEmitter {
                 return storeLocal(ins.op - O.ASTORE_0, K_REF);
 
             case O.IINC: {
-                String nm = localName(ins.operand(0), K_INT, SlotType.INT_T);
-                declareLocal(ins.operand(0), K_INT, SlotType.INT_T);
+                int slot = ins.operand(0);
                 int delta = ins.operand(1);
-                if (delta == 1) {
+                SlotType precise = frameLocal(slot, K_INT);
+                String nm = localName(slot, K_INT, precise);
+                declareLocal(slot, K_INT, precise);
+                if (isBooleanSlot(slot, nm)) {
+                    // The bytecode increments a boolean slot as if it were an int;
+                    // the Java variable is a real boolean, so convert both ways.
+                    out.line(nm + " = (((" + nm + " ? 1 : 0) + " + delta + ") != 0);");
+                } else if (delta == 1) {
                     out.line(nm + "++;");
                 } else if (delta == -1) {
                     out.line(nm + "--;");
@@ -975,9 +1027,17 @@ public final class MethodEmitter {
             case O.AALOAD: {
                 Val index = pop();
                 Val arr = pop();
-                SlotType et = elemType(arr.sem);
-                push(new Val("((" + et.javaType() + ")((" + arrayExpr(arr, "java.lang.Object[]")
-                        + ")[" + coerce(index, SlotType.INT_T) + "]))", et, null));
+                String arrDesc = arrayDescOf(arr);
+                if (arrDesc != null) {
+                    SlotType et = elemType(arr.sem);
+                    push(new Val("((" + javaType(et) + ")((" + arrayExpr(arr, null)
+                            + ")[" + coerce(index, SlotType.INT_T) + "]))", et, null));
+                } else {
+                    // Unknown element type: read reflectively and let the caller
+                    // cast the result.
+                    push(new Val("j2pc.rt.Arrays.get(" + arr.code + ", "
+                            + coerce(index, SlotType.INT_T) + ")", SlotType.OBJECT_T, null));
+                }
                 return false;
             }
 
@@ -1047,10 +1107,21 @@ public final class MethodEmitter {
                 Val value = pop();
                 Val index = pop();
                 Val arr = pop();
-                SlotType et = elemType(arr.sem);
-                String target = et.kind == SlotType.REF ? et.javaType() : "java.lang.Object";
-                out.line(arrayExpr(arr, target + "[]") + "[" + coerce(index, SlotType.INT_T) + "] = "
-                        + coerce(value, et) + ";");
+                String arrDesc = arrayDescOf(arr);
+                if (arrDesc != null && arrDesc.startsWith("[L")) {
+                    SlotType et = elemType(arr.sem);
+                    out.line(arrayExpr(arr, null) + "[" + coerce(index, SlotType.INT_T) + "] = "
+                            + coerce(value, et) + ";");
+                } else if (arrDesc != null && arrDesc.startsWith("[[")) {
+                    SlotType et = elemType(arr.sem);
+                    out.line(arrayExpr(arr, null) + "[" + coerce(index, SlotType.INT_T) + "] = "
+                            + coerce(value, et) + ";");
+                } else {
+                    // The element type is unknown; a wrong cast would fail at run
+                    // time, so store through reflection instead.
+                    out.line("j2pc.rt.Arrays.set(" + arr.code + ", "
+                            + coerce(index, SlotType.INT_T) + ", " + value.code + ");");
+                }
                 return false;
             }
 
@@ -1302,11 +1373,14 @@ public final class MethodEmitter {
                 out.line("return;");
                 return true;
 
+            case O.INVOKEDYNAMIC:
+                return emitInvokeDynamic(ins);
+
             case O.GETSTATIC: {
                 int idx = ins.operand(0);
                 String owner = cp.refOwner(idx);
                 String desc = cp.refType(idx);
-                String access = typeRef(owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx));
+                String access = types.refInternal(owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx));
                 if (desc.charAt(0) == 'Z') {
                     push(new Val("(" + access + " ? 1 : 0)", SlotType.INT_T, null));
                 } else {
@@ -1319,7 +1393,7 @@ public final class MethodEmitter {
                 String owner = cp.refOwner(idx);
                 String desc = cp.refType(idx);
                 Val v = pop();
-                out.line(typeRef(owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx)) + " = "
+                out.line(types.refInternal(owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx)) + " = "
                         + coerceTo(v.code, v.type, desc) + ";");
                 return false;
             }
@@ -1354,14 +1428,14 @@ public final class MethodEmitter {
             case O.NEW: {
                 String owner = cp.className(ins.operand(0));
                 String nm = "__n" + (tempSeq++);
-                declarations.add(typeRef(owner) + " " + nm + " = null;");
+                declarations.add(types.refInternal(owner) + " " + nm + " = null;");
                 push(new Val(nm, SlotType.ref(owner), owner));
                 return false;
             }
             case O.NEWARRAY: {
                 Val count = pop();
                 String desc = arrayDesc(ins.operand(0));
-                String base = Descriptor.javaType(desc.substring(1));
+                String base = types.ref(desc.substring(1));
                 push(new Val("new " + base + "[" + count.code + "]", SlotType.ref(desc), null));
                 return false;
             }
@@ -1383,7 +1457,7 @@ public final class MethodEmitter {
                 while (totalDims < desc.length() && desc.charAt(totalDims) == '[') {
                     totalDims++;
                 }
-                String base = Descriptor.javaType(desc.substring(totalDims));
+                String base = types.ref(desc.substring(totalDims));
                 StringBuilder sb = new StringBuilder("new ").append(base);
                 for (int i = 0; i < dims; i++) {
                     sb.append('[').append(sizes.get(i).code).append(']');
@@ -1419,16 +1493,16 @@ public final class MethodEmitter {
             case O.CHECKCAST: {
                 Val v = pop();
                 String target = cp.className(ins.operand(0));
-                String type = target.startsWith("[") ? Descriptor.javaType(target)
-                        : Descriptor.javaType("L" + target + ";");
+                String type = target.startsWith("[") ? types.ref(target)
+                        : types.refInternal(target);
                 push(new Val("((" + type + ")(" + v.code + "))", SlotType.ref(target), null));
                 return false;
             }
             case O.INSTANCEOF: {
                 Val v = pop();
                 String target = cp.className(ins.operand(0));
-                String type = target.startsWith("[") ? Descriptor.javaType(target)
-                        : Descriptor.javaType("L" + target + ";");
+                String type = target.startsWith("[") ? types.ref(target)
+                        : types.refInternal(target);
                 push(new Val("(" + v.code + " instanceof " + type + " ? 1 : 0)", SlotType.INT_T, null));
                 return false;
             }
@@ -1452,6 +1526,11 @@ public final class MethodEmitter {
     // ----------------------------------------------------------- load / store
 
     private boolean loadLocal(int slot, int kind) {
+        Val fresh = freshLocals.get(slot);
+        if (fresh != null) {
+            push(fresh);
+            return false;
+        }
         SlotType precise = frameLocal(slot, kind);
         declareLocal(slot, kind, precise);
         push(new Val(localRead(slot, kind, precise), localType(slot, kind, precise), null));
@@ -1480,8 +1559,48 @@ public final class MethodEmitter {
         return idx < args.length ? args[idx] : null;
     }
 
+    /** True when this slot holds a {@code boolean} parameter stored as a boolean. */
+    private boolean isBooleanSlot(int slot, String varName) {
+        return "Z".equals(argDesc(slot)) && varName.equals(argNameForSlot(slot));
+    }
+
+    /**
+     * Casts a value to the narrow primitive type of a parameter.
+     *
+     * <p>Bytecode keeps {@code boolean}, {@code byte}, {@code char} and
+     * {@code short} on the stack as plain ints, but the generated parameter keeps
+     * its real Java type, so an explicit cast is needed on every store.</p>
+     */
+    private String narrowToArgType(int slot, String value) {
+        String desc = argDesc(slot);
+        if (desc == null) {
+            return null;
+        }
+        switch (desc.charAt(0)) {
+            case 'Z':
+                return "(" + value + ") != 0";
+            case 'B':
+                return "(byte)(" + value + ")";
+            case 'C':
+                return "(char)(" + value + ")";
+            case 'S':
+                return "(short)(" + value + ")";
+            default:
+                return null;
+        }
+    }
+
     private boolean storeLocal(int slot, int kind) {
         Val v = pop();
+        if (v.freshNew != null) {
+            // An object created by `new` is stored into a local before its
+            // constructor runs (`new`/`dup`/`astore`/.../`aload`/`invokespecial`).
+            // The local is remembered as an alias of the temporary so the later
+            // <init> call can still be turned into `temp = new X(...)`.
+            freshLocals.put(slot, new Val(v.code, v.type, v.freshNew));
+            return false;
+        }
+        freshLocals.remove(slot);
         SlotType precise = storeType(slot, kind, v);
         if (localNow != null && slot < localNow.length) {
             localNow[slot] = precise;
@@ -1494,6 +1613,11 @@ public final class MethodEmitter {
             return false;
         }
         String value = coerce(v, t);
+        String narrow = nm.equals(argNameForSlot(slot)) ? narrowToArgType(slot, value) : null;
+        if (narrow != null) {
+            out.line(nm + " = " + narrow + ";");
+            return false;
+        }
         if (value.equals(nm + " + 1")) {
             out.line(nm + "++;");
         } else if (value.equals(nm + " - 1")) {
@@ -1551,7 +1675,7 @@ public final class MethodEmitter {
             return;
         }
         SlotType t = localType(slot, kind, precise);
-        declare(nm, t.javaType(), t.defaultLiteral());
+        declare(nm, javaType(t), t.defaultLiteral());
     }
 
     /**
@@ -1667,8 +1791,8 @@ public final class MethodEmitter {
                 return new Val(quote(cp.stringValue(idx)), SlotType.STRING_T, null);
             case ConstantPool.CLASS: {
                 String name = cp.className(idx);
-                String type = name.startsWith("[") ? Descriptor.javaType(name)
-                        : Descriptor.javaType("L" + name + ";");
+                String type = name.startsWith("[") ? types.ref(name)
+                        : types.refInternal(name);
                 return new Val(type + ".class", SlotType.ref("java/lang/Class"), null);
             }
             default:
@@ -1708,6 +1832,287 @@ public final class MethodEmitter {
         return true;
     }
 
+    /**
+     * {@code invokedynamic}: the call site is described by a bootstrap method.
+     *
+     * <p>Two bootstrap targets matter in practice, and both are translated to
+     * plain Java:</p>
+     *
+     * <ul>
+     *   <li>{@code StringConcatFactory} — compiled string concatenation, emitted as
+     *       {@code a + b + c} using the recipe carried in the bootstrap arguments;</li>
+     *   <li>{@code LambdaMetafactory} — a lambda, emitted as an anonymous class
+     *       implementing the functional interface.</li>
+     * </ul>
+     *
+     * <p>Anything else becomes a stub that compiles and throws when reached, so a
+     * single exotic call site cannot break the whole class.</p>
+     */
+    private boolean emitInvokeDynamic(Instruction ins) {
+        int idx = ins.operand(0);
+        String desc = cp.refType(idx);
+        if (desc == null) {
+            out.line("throw new IllegalStateException(\"bad invokedynamic at " + ins.pc + "\");");
+            return true;
+        }
+        String[] args = Descriptor.args(desc);
+        String ret = Descriptor.returnType(desc);
+
+        ClassFile.BootstrapMethod[] bootstraps = cf.bootstrapMethods();
+        int bootstrapIndex = cp.bootstrapIndex(idx);
+        ClassFile.BootstrapMethod bm = bootstrapIndex >= 0 && bootstrapIndex < bootstraps.length
+                ? bootstraps[bootstrapIndex] : null;
+
+        String bsmOwner = null;
+        String bsmName = null;
+        if (bm != null) {
+            // The bootstrap entry points at a MethodHandle; its owner and name
+            // live on the referenced member, not on the handle itself.
+            int target = cp.methodHandleIndex(bm.methodRef);
+            bsmOwner = cp.refOwner(target);
+            bsmName = cp.refName(target);
+        }
+
+        if (bm != null && "java/lang/invoke/StringConcatFactory".equals(bsmOwner)) {
+            return emitStringConcat(ins, bm, args, "makeConcatWithConstants".equals(bsmName));
+        }
+        if (bm != null && "java/lang/invoke/LambdaMetafactory".equals(bsmOwner)) {
+            return emitLambda(ins, bm, args, ret);
+        }
+
+        // Unknown bootstrap: consume the arguments so the stack stays consistent.
+        for (int i = 0; i < args.length; i++) {
+            pop();
+        }
+        out.line("throw new UnsupportedOperationException(\"invokedynamic " + bsmOwner
+                + "." + bsmName + " at " + ins.pc + "\");");
+        if (!"V".equals(ret)) {
+            return true;
+        }
+        return false;
+    }
+
+    /** String concatenation: rebuild the {@code +} expression from the recipe. */
+    private boolean emitStringConcat(Instruction ins, ClassFile.BootstrapMethod bm,
+                                     String[] args, boolean withConstants) {
+        List<String> parts = new ArrayList<>();
+        List<SlotType> types = new ArrayList<>();
+        for (int i = args.length - 1; i >= 0; i--) {
+            Val v = pop();
+            parts.add(0, v.code);
+            types.add(0, v.type);
+        }
+
+        if (!withConstants || bm.args.length == 0) {
+            StringBuilder sb = new StringBuilder("(\"\"");
+            for (String p : parts) {
+                sb.append(" + ").append(p);
+            }
+            sb.append(')');
+            push(new Val(sb.toString(), SlotType.STRING_T, null));
+            return false;
+        }
+
+        String recipe = cp.stringValue(bm.args[0]);
+        if (recipe == null) {
+            recipe = "";
+        }
+
+        StringBuilder sb = new StringBuilder("(\"\"");
+        int argIndex = 0;
+        int constIndex = 1;
+        StringBuilder literal = new StringBuilder();
+        for (int i = 0; i < recipe.length(); i++) {
+            char c = recipe.charAt(i);
+            if (c == '\u0001') {
+                flushLiteral(sb, literal);
+                if (argIndex < parts.size()) {
+                    sb.append(" + ").append(parts.get(argIndex++));
+                }
+            } else if (c == '\u0002') {
+                flushLiteral(sb, literal);
+                if (constIndex < bm.args.length) {
+                    String constant = cp.stringValue(bm.args[constIndex++]);
+                    sb.append(" + ").append(quote(constant == null ? "" : constant));
+                }
+            } else {
+                literal.append(c);
+            }
+        }
+        flushLiteral(sb, literal);
+        sb.append(')');
+        push(new Val(sb.toString(), SlotType.STRING_T, null));
+        return false;
+    }
+
+    private static void flushLiteral(StringBuilder sb, StringBuilder literal) {
+        if (literal.length() == 0) {
+            return;
+        }
+        sb.append(" + ").append(quote(literal.toString()));
+        literal.setLength(0);
+    }
+
+    /** Lambda: an anonymous class implementing the functional interface. */
+    private boolean emitLambda(Instruction ins, ClassFile.BootstrapMethod bm,
+                               String[] args, String interfaceDesc) {
+        if (bm.args.length < 2) {
+            for (int i = 0; i < args.length; i++) {
+                pop();
+            }
+            out.line("throw new UnsupportedOperationException(\"lambda at " + ins.pc + "\");");
+            return true;
+        }
+
+        int handleIndex = bm.args[1];
+        int targetIndex = cp.methodHandleIndex(handleIndex);
+        String implOwner = cp.refOwner(targetIndex);
+        String implName = cp.refName(targetIndex);
+        String implDesc = cp.refType(targetIndex);
+        int handleKind = cp.methodHandleKind(handleIndex);
+        String[] implArgs = Descriptor.args(implDesc == null ? "()V" : implDesc);
+        String implRet = Descriptor.returnType(implDesc == null ? "()V" : implDesc);
+
+        // Captured values, in order. Each one is copied into a final local: the
+        // anonymous class may only capture effectively final variables, and a
+        // recompiled method stores its locals many times.
+        List<Val> captured = new ArrayList<>();
+        for (int i = args.length - 1; i >= 0; i--) {
+            captured.add(0, materializeForCapture(pop()));
+        }
+
+        String interfaceType = types.ref(interfaceDesc);
+        String samDesc = bm.args.length > 0 ? cp.methodTypeDescriptor(bm.args[0]) : "()V";
+        if (samDesc == null) {
+            samDesc = "()V";
+        }
+        String samName = samMethodName(interfaceDesc);
+        String[] samArgs = Descriptor.args(samDesc);
+        String samRet = Descriptor.returnType(samDesc);
+
+        StringBuilder sb = new StringBuilder("new ").append(interfaceType).append("() {\n");
+        sb.append("public ").append(types.ref(samRet))
+                .append(' ').append(samName).append('(');
+        for (int i = 0; i < samArgs.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(types.ref(samArgs[i])).append(" a").append(i);
+        }
+        sb.append(") {\n");
+
+        // Everything the implementation method receives, in order: captured
+        // values first, then the interface method's own arguments.
+        List<String> actual = new ArrayList<>();
+        List<SlotType> actualTypes = new ArrayList<>();
+        for (Val v : captured) {
+            actual.add(v.code);
+            actualTypes.add(v.type);
+        }
+        for (int i = 0; i < samArgs.length; i++) {
+            actual.add("a" + i);
+            actualTypes.add(SlotType.ofDescriptor(samArgs[i]));
+        }
+
+        String ownerType = types.refInternal(implOwner);
+        StringBuilder call = new StringBuilder();
+        int implArgStart = 0;
+
+        if (handleKind == 8) {
+            // REF_newInvokeSpecial: the handle is a constructor.
+            call.append("new ").append(ownerType).append('(');
+        } else if (handleKind == 6) {
+            call.append(ownerType).append('.').append(Names.external(implName)).append('(');
+        } else {
+            // An instance handle receives the receiver as its first argument. It is
+            // either a captured value or, for an unbound reference such as
+            // String::length, the interface method's first argument.
+            String receiver = actual.isEmpty() ? "null" : actual.remove(0);
+            actualTypes.remove(0);
+            call.append("((").append(ownerType).append(")(").append(receiver).append("))")
+                    .append('.').append(Names.external(implName)).append('(');
+            implArgStart = 1;
+        }
+
+        List<String> callArgs = new ArrayList<>();
+        for (int i = 0; i < actual.size(); i++) {
+            String target = argAt(implArgs, implArgStart + i);
+            callArgs.add(castTo(actual.get(i), actualTypes.get(i), target));
+        }
+        for (int i = 0; i < callArgs.size(); i++) {
+            if (i > 0) {
+                call.append(", ");
+            }
+            call.append(callArgs.get(i));
+        }
+        call.append(')');
+
+        if ("V".equals(samRet)) {
+            sb.append(call).append(";\n");
+        } else {
+            String value = castTo(call.toString(), SlotType.ofDescriptor(implRet), samRet);
+            sb.append("return ").append(value).append(";\n");
+        }
+        sb.append("}\n}");
+
+        push(new Val(sb.toString(), SlotType.ref(Descriptor.internalName(interfaceDesc)), null));
+        return false;
+    }
+
+    private static String argAt(String[] args, int index) {
+        return index < args.length ? args[index] : "Ljava/lang/Object;";
+    }
+
+    /**
+     * Copies a value into a {@code final} local so that a lambda can capture it.
+     * Literals and {@code this} are already effectively final and stay as they are.
+     */
+    private Val materializeForCapture(Val v) {
+        String code = v.code == null ? "null" : v.code.trim();
+        if (code.equals("this") || code.equals("null") || code.equals("true") || code.equals("false")
+                || code.matches("-?\\d+[lLfFdD]?") || code.startsWith("\"")) {
+            return v;
+        }
+        String name = "__cap" + (tempSeq++);
+        String type = javaType(v.type);
+        out.line("final " + type + " " + name + " = " + coerce(v, v.type) + ";");
+        return new Val(name, v.type, null);
+    }
+
+    /** Casts an expression to a parameter type, tolerating unknown descriptors. */
+    private String castTo(String code, SlotType actual, String desc) {
+        if (desc == null || desc.isEmpty()) {
+            return code;
+        }
+        SlotType target = SlotType.ofDescriptor(desc);
+        String coerced = coerce(new Val(code, actual, null), target);
+        return coerced;
+    }
+
+    /** Name of the single abstract method of a functional interface. */
+    private String samMethodName(String interfaceDesc) {
+        String internal = Descriptor.internalName(interfaceDesc);
+        // The interface is usually not the current class, so reflection is the
+        // most reliable source; fall back to the conventional names otherwise.
+        try {
+            Class<?> c = Class.forName(internal.replace('/', '.'));
+            for (java.lang.reflect.Method m : c.getMethods()) {
+                if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
+                    return m.getName();
+                }
+            }
+        } catch (Throwable ignored) {
+            // not on the class path
+        }
+        if ("java/util/Comparator".equals(internal)) {
+            return "compare";
+        }
+        if ("java/lang/Runnable".equals(internal)) {
+            return "run";
+        }
+        return "apply";
+    }
+
     private boolean emitInvoke(Instruction ins) {
         int idx = ins.operand(0);
         String owner = cp.refOwner(idx);
@@ -1744,12 +2149,12 @@ public final class MethodEmitter {
         StringBuilder call = new StringBuilder();
 
         if (ins.op == O.INVOKESTATIC) {
-            call.append(typeRef(owner)).append('.').append(names.method(owner, name, desc)).append('(');
+            call.append(types.refInternal(owner)).append('.').append(names.method(owner, name, desc)).append('(');
         } else {
             Val recv = pop();
             if (ins.op == O.INVOKESPECIAL && isInit) {
                 if (recv.freshNew != null) {
-                    String expr = "new " + typeRef(owner) + "(";
+                    String expr = "new " + types.refInternal(owner) + "(";
                     StringBuilder inner = new StringBuilder(expr);
                     appendArgs(inner, argCodes);
                     inner.append(')');
@@ -1776,12 +2181,17 @@ public final class MethodEmitter {
                     }
                     return false;
                 }
-                if (owner.equals(cf.name())) {
+                // A constructor call on an already constructed object is either
+                // the mandatory this(...) or super(...) chain. Only the receiver
+                // `this` can appear here; anything else would be a call on a
+                // different instance, which Java cannot express.
+                if ("this".equals(recv.code) && owner.equals(cf.name())) {
                     call.append("this(");
                 } else if ("this".equals(recv.code)) {
                     call.append("super(");
                 } else {
-                    call.append(cast(recv, owner)).append('.').append(names.method(owner, name, desc)).append('(');
+                    call.append(cast(recv, owner)).append('.').append(names.method(owner, name, desc))
+                            .append('(');
                 }
             } else if (ins.op == O.INVOKESPECIAL && "this".equals(recv.code)
                     && owner.equals(cf.superName())) {
@@ -1808,16 +2218,19 @@ public final class MethodEmitter {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(args.get(i));
+            String arg = args.get(i);
+            // `append(null)` is ambiguous between the String and char[] overloads,
+            // so a bare null literal has to be typed explicitly.
+            sb.append("null".equals(arg) ? "(java.lang.Object) null" : arg);
         }
     }
 
     private String cast(Val recv, String owner) {
-        String want = typeRef(owner);
+        String want = types.refInternal(owner);
         if (recv.type.kind == SlotType.REF) {
             if (recv.type.desc != null) {
-                String have = recv.type.desc.startsWith("[") ? Descriptor.javaType(recv.type.desc)
-                        : Descriptor.javaType("L" + recv.type.desc + ";");
+                String have = recv.type.desc.startsWith("[") ? types.ref(recv.type.desc)
+                        : types.refInternal(recv.type.desc);
                 if (have.equals(want)) {
                     return recv.code;
                 }
@@ -1832,10 +2245,26 @@ public final class MethodEmitter {
         if (internalName == null) {
             return "java.lang.Object";
         }
-        if (internalName.startsWith("[")) {
-            return Descriptor.javaType(internalName);
+        return types.refInternal(internalName);
+    }
+
+    /**
+     * Java type of an analysed value, mapped through the type mapper so that a
+     * relocated class is referenced by its new package.
+     */
+    private String javaType(SlotType t) {
+        if (t == null) {
+            return "java.lang.Object";
         }
-        return Descriptor.javaType("L" + internalName + ";");
+        if (t.kind == SlotType.REF && t.desc != null) {
+            return types.refInternal(t.desc);
+        }
+        // Arrays of relocated classes also need mapping.
+        String raw = t.javaType();
+        if (t.kind == SlotType.REF && raw.endsWith("[]")) {
+            return javaType(SlotType.ofDescriptor(t.descriptor())) + "[]";
+        }
+        return raw;
     }
 
     /**
@@ -1860,7 +2289,7 @@ public final class MethodEmitter {
      * type, a cast is inserted. If even the analysis lost the type, the array
      * kind implied by the opcode is used as a last resort.
      */
-    private static String arrayExpr(Val arr, String fallbackArrayType) {
+    private String arrayExpr(Val arr, String fallbackArrayType) {
         boolean staticallyArray = arr.type.kind == SlotType.REF
                 && arr.type.desc != null && arr.type.desc.startsWith("[");
         if (staticallyArray) {
@@ -1869,7 +2298,7 @@ public final class MethodEmitter {
         boolean knownArray = arr.sem.kind == SlotType.REF
                 && arr.sem.desc != null && arr.sem.desc.startsWith("[");
         if (knownArray) {
-            return "((" + arr.sem.javaType() + ")(" + arr.code + "))";
+            return "((" + javaType(arr.sem) + ")(" + arr.code + "))";
         }
         if (fallbackArrayType == null) {
             return arr.code;
@@ -1894,8 +2323,12 @@ public final class MethodEmitter {
     /**
      * Builds {@code new T[n][]...} for {@code anewarray}. The component type may
      * itself be an array ({@code anewarray [I} creates {@code int[n][]}).
+     *
+     * <p>Note that a single-letter class name such as {@code n} is <em>not</em> a
+     * primitive descriptor, even though it has the same length — obfuscators rely
+     * on exactly that confusion.</p>
      */
-    private static String arrayCreation(String componentInternalName, String size) {
+    private String arrayCreation(String componentInternalName, String size) {
         String desc = componentInternalName;
         int dims = 0;
         if (desc.startsWith("[")) {
@@ -1906,11 +2339,11 @@ public final class MethodEmitter {
         }
         String base;
         if (desc.startsWith("L") && desc.endsWith(";")) {
-            base = Descriptor.javaType(desc);
-        } else if (desc.length() == 1) {
+            base = types.ref(desc);
+        } else if (desc.length() == 1 && Descriptor.isPrimitive(desc)) {
             base = Descriptor.javaType(desc);
         } else {
-            base = Descriptor.javaType("L" + desc + ";");
+            base = types.refInternal(desc);
         }
         StringBuilder sb = new StringBuilder("new ").append(base).append('[').append(size).append(']');
         for (int i = 0; i < dims; i++) {

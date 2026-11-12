@@ -35,9 +35,9 @@ public final class Connector {
             return new HttpConnectionImpl(name, mode);
         }
         if (name.startsWith("file://")) {
-            return new FileConnectionImpl(name.substring("file://".length()), mode);
+            return new javax.microedition.io.file.FileConnectionImpl(name);
         }
-        throw new IOException("unsupported protocol: " + name);
+        throw new ConnectionNotFoundException("unsupported protocol: " + name);
     }
 
     public static InputStream openInputStream(String name) throws IOException {
@@ -271,44 +271,6 @@ public final class Connector {
             if (connection != null) {
                 connection.disconnect();
             }
-        }
-    }
-
-    // ------------------------------------------------------------ file impl
-
-    private static final class FileConnectionImpl implements StreamConnection {
-
-        private final String path;
-        private final int mode;
-
-        FileConnectionImpl(String path, int mode) {
-            this.path = path;
-            this.mode = mode;
-        }
-
-        @Override
-        public InputStream openInputStream() throws IOException {
-            return java.nio.file.Files.newInputStream(java.nio.file.Path.of(path));
-        }
-
-        @Override
-        public DataInputStream openDataInputStream() throws IOException {
-            return new DataInputStream(openInputStream());
-        }
-
-        @Override
-        public OutputStream openOutputStream() throws IOException {
-            return java.nio.file.Files.newOutputStream(java.nio.file.Path.of(path));
-        }
-
-        @Override
-        public DataOutputStream openDataOutputStream() throws IOException {
-            return new DataOutputStream(openOutputStream());
-        }
-
-        @Override
-        public void close() {
-            // nothing to release
         }
     }
 

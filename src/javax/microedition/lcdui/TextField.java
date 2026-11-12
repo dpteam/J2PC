@@ -51,6 +51,10 @@ public class TextField extends Item {
     public void setConstraints(int constraints) {
     }
 
+    /** Present in MIDP 2.0; the desktop layer ignores the request. */
+    public void setFont(Font font) {
+    }
+
     public void setInitialInputMode(String characterSubset) {
     }
 

@@ -48,6 +48,31 @@ public abstract class Item {
     public void notifyStateChanged() {
     }
 
+    /** Commands attached to this item, as MIDP 2.0 allows. */
+    public void addCommand(Command cmd) {
+        commands.add(cmd);
+    }
+
+    public void removeCommand(Command cmd) {
+        commands.remove(cmd);
+    }
+
+    public void setItemCommandListener(ItemCommandListener l) {
+        this.listener = l;
+    }
+
+    public void setDefaultCommand(Command cmd) {
+        this.defaultCommand = cmd;
+    }
+
+    public Command getDefaultCommand() {
+        return defaultCommand;
+    }
+
+    private final java.util.List<Command> commands = new java.util.ArrayList<>();
+    private ItemCommandListener listener;
+    private Command defaultCommand;
+
     abstract int paint(Graphics g, int x, int y, int width);
 
     abstract int height(int width);

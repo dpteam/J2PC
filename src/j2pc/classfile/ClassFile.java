@@ -74,6 +74,45 @@ public final class ClassFile {
         return attr(attributes, name);
     }
 
+    /**
+     * Parsed {@code BootstrapMethods} attribute.
+     *
+     * <p>Needed for {@code invokedynamic}: the call site names a bootstrap method
+     * by index, and the static arguments of that bootstrap method carry the data
+     * the recompiler needs (a string concatenation recipe, a lambda target).</p>
+     */
+    public BootstrapMethod[] bootstrapMethods() {
+        Attr a = attr(attributes, "BootstrapMethods");
+        if (a == null) {
+            return new BootstrapMethod[0];
+        }
+        try {
+            DataInputStream in = new DataInputStream(new ByteArrayInputStream(a.data));
+            int n = in.readUnsignedShort();
+            BootstrapMethod[] out = new BootstrapMethod[n];
+            for (int i = 0; i < n; i++) {
+                BootstrapMethod bm = new BootstrapMethod();
+                bm.methodRef = in.readUnsignedShort();
+                int argc = in.readUnsignedShort();
+                bm.args = new int[argc];
+                for (int j = 0; j < argc; j++) {
+                    bm.args[j] = in.readUnsignedShort();
+                }
+                out[i] = bm;
+            }
+            return out;
+        } catch (IOException e) {
+            return new BootstrapMethod[0];
+        }
+    }
+
+    public static final class BootstrapMethod {
+        /** Constant pool index of a {@code MethodHandle}. */
+        public int methodRef;
+        /** Constant pool indexes of the static arguments. */
+        public int[] args = new int[0];
+    }
+
     public static Attr attr(Attr[] attrs, String name) {
         for (Attr a : attrs) {
             if (a.name.equals(name)) {
