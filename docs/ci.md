@@ -50,6 +50,42 @@ Settings → Secrets and variables → Actions → Variables → New variable
 The job expects the JARs to be available in `samples/`. Restore them from a cache or a private
 artifact, since they cannot be committed.
 
+### Working on the corpus
+
+The corpus tools are built around one idea: **fix causes, not applications**. A single
+application failing tells you almost nothing; the same message appearing in twenty tells you
+exactly where the translator is weak.
+
+```powershell
+# 1. recompile and compile everything, writing one merged report
+powershell -File tools/batch.ps1 -Compile `
+    -Source 'D:\j2me\DPT','D:\j2me\GoodJ2ME','D:\j2me\jAR-HIVE'
+
+# 2. consolidate: which kinds of failure are most common, in how many apps
+powershell -File tools\errors.ps1 -Batch build\batch -Top 25
+```
+
+`errors.ps1` normalises each javac message (file names, line numbers and identifiers become
+placeholders), so `cannot find symbol` variants collapse into one row, and sorts by **number of
+applications affected** rather than raw error count. One row means one fix worth doing.
+
+It also writes `build/batch/errors-summary.csv`, which is the file to diff between runs:
+
+```powershell
+# before a change
+powershell -File tools\errors.ps1
+Copy-Item build\batch\errors-summary.csv build\before.csv
+
+# ... make the change, re-run batch.ps1 ...
+
+# after
+powershell -File tools\errors.ps1
+Compare-Object (Import-Csv build\before.csv) (Import-Csv build\batch\errors-summary.csv) -Property Kind
+```
+
+`batch.ps1` accepts several folders at once and keeps the per-application output separate, so
+adding a new collection never invalidates the previous measurements.
+
 ## `release.yml` — on a `v*` tag
 
 1. builds and self-tests,

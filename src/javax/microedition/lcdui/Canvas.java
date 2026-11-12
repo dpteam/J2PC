@@ -38,25 +38,33 @@ public abstract class Canvas extends Displayable {
 
     protected abstract void paint(Graphics g);
 
-    protected void keyPressed(int keyCode) {
+    /**
+     * Key handling.
+     *
+     * <p>MIDP declares these {@code protected}, but recompiled code frequently calls
+     * them on another instance — bytecode can, because it does not enforce the
+     * rule the same way. Widening to {@code public} keeps the behaviour and lets the
+     * generated source compile.</p>
+     */
+    public void keyPressed(int keyCode) {
     }
 
-    protected void keyReleased(int keyCode) {
+    public void keyReleased(int keyCode) {
     }
 
-    protected void keyRepeated(int keyCode) {
+    public void keyRepeated(int keyCode) {
     }
 
-    protected void pointerPressed(int x, int y) {
+    public void pointerPressed(int x, int y) {
     }
 
-    protected void pointerReleased(int x, int y) {
+    public void pointerReleased(int x, int y) {
     }
 
-    protected void pointerDragged(int x, int y) {
+    public void pointerDragged(int x, int y) {
     }
 
-    protected void sizeChanged(int w, int h) {
+    public void sizeChanged(int w, int h) {
     }
 
     public final void repaint() {

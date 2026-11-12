@@ -208,7 +208,11 @@ public final class ClassEmitter {
                 continue;
             }
             String key = m.name() + m.desc();
-            if (m.isAbstract()) {
+            // An interface method without a body is abstract even when the
+            // compiler forgot to set ACC_ABSTRACT, which old CLDC tools did.
+            boolean abstractMethod = m.isAbstract()
+                    || (superType.isInterface() && m.code() == null && !m.isStatic());
+            if (abstractMethod) {
                 if (!out.containsKey(key)) {
                     out.put(key, m);
                     declaredBy.put(key, internal);
@@ -367,7 +371,7 @@ public final class ClassEmitter {
         }
         out.blank();
 
-        String code = MethodEmitter.emit(cf, clinit, opts, names, types);
+        String code = MethodEmitter.emitStaticInitializer(cf, clinit, opts, names, types);
         int open = code.indexOf('{');
         int close = code.lastIndexOf('}');
         out.line("static {");

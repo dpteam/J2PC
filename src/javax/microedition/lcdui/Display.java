@@ -68,6 +68,14 @@ public final class Display {
         }
     }
 
+    /** MIDP 2.0 overload: show an alert, then continue with {@code next}. */
+    public void setCurrent(Alert alert, Displayable next) {
+        if (alert == null) {
+            throw new NullPointerException("alert");
+        }
+        setCurrent(alert);
+    }
+
     public Displayable getCurrent() {
         return current;
     }

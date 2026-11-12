@@ -110,7 +110,7 @@ public final class SyntheticMidlet extends MIDlet implements CommandListener {
         }
 
         @Override
-        protected void keyPressed(int keyCode) {
+        public void keyPressed(int keyCode) {
             switch (getGameAction(keyCode)) {
                 case UP:
                     cursorY = Math.max(0, cursorY - 1);

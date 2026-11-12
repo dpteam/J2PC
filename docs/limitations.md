@@ -123,8 +123,8 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 63 produce Java that
-compiles (1 079 classes, 36 092 methods). The rest fail on **missing APIs** or on suites that
+On a private collection of 151 applications, all 151 recompile and 76 produce Java that
+compiles (1 272 classes, 45 800 methods). The rest fail on **missing APIs** or on suites that
 ship only part of their classes:
 
 | Missing / broken | Applications |

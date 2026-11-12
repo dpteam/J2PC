@@ -1356,7 +1356,10 @@ public final class MethodEmitter {
 
             case O.INEG: case O.LNEG: case O.FNEG: case O.DNEG: {
                 Val a = pop();
-                push(new Val("(-" + a.code + ")", a.type, null));
+                // Bytecode only negates numbers, but the analysis may have lost the
+                // type; coerce first so the result is never `-(Object)`.
+                SlotType target = negResultType(ins.op);
+                push(new Val("(-" + coerce(a, target) + ")", target, null));
                 return false;
             }
 
@@ -2516,8 +2519,17 @@ public final class MethodEmitter {
         }
     }
 
-    private static SlotType arithResultType(int op) {
-        if (op == O.LADD || op == O.LSUB || op == O.LMUL || op == O.LDIV || op == O.LREM
+    /** Result type of a {@code neg} opcode. */
+    private static SlotType negResultType(int op) {
+        switch (op) {
+            case O.LNEG: return SlotType.LONG_T;
+            case O.FNEG: return SlotType.FLOAT_T;
+            case O.DNEG: return SlotType.DOUBLE_T;
+            default: return SlotType.INT_T;
+        }
+    }
+
+    private static SlotType arithResultType(int op) {        if (op == O.LADD || op == O.LSUB || op == O.LMUL || op == O.LDIV || op == O.LREM
                 || op == O.LAND || op == O.LOR || op == O.LXOR) {
             return SlotType.LONG_T;
         }

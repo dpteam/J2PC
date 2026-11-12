@@ -52,12 +52,12 @@ public abstract class GameCanvas extends Canvas {
     }
 
     @Override
-    protected void keyPressed(int keyCode) {
+    public void keyPressed(int keyCode) {
         keyStates |= mask(keyCode);
     }
 
     @Override
-    protected void keyReleased(int keyCode) {
+    public void keyReleased(int keyCode) {
         keyStates &= ~mask(keyCode);
     }
 
