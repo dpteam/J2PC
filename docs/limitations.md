@@ -123,18 +123,20 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 93 produce Java that
-compiles (1 625 classes, 60 883 methods). The rest fail on **missing APIs** or on suites that
-ship only part of their classes:
+On a private collection of 151 applications, all 151 recompile and 106 produce Java that
+compiles (2 227 classes, 68 355 methods). Of the 200 remaining javac errors, most are
+suites that ship only part of their classes.
 
 | Missing / broken | Applications |
 |------------------|--------------|
-| `javax.microedition.m3g` (3D engine) | 12 |
-| `com.mascotcapsule.micro3d.v3` (3D engine) | ~6 |
+| `javax.microedition.m3g` (3D engine) | stubbed; runtime throws |
+| `com.mascotcapsule.micro3d.v3` (3D engine) | stubbed; runtime throws |
 | incomplete JARs (classes referenced but not shipped) | remainder |
-| vendor extensions (`com.siemens`, `com.motorola`, …) | remainder |
+| vendor extensions (`com.siemens`, `com.motorola`, …) | stubbed |
 
 Implementing a 3D engine is a separate project; the 2D platform is what this tool targets.
+The stubs exist so that "the translation is wrong" can be told apart from "this API is
+missing", which is what the corpus numbers measure.
 
 ### Two structural limits
 

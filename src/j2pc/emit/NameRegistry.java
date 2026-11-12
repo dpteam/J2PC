@@ -118,6 +118,35 @@ public final class NameRegistry {
         register(cf);
     }
 
+    /**
+     * Allocates a name for a member that the archive record of {@code owner} is
+     * missing.
+     *
+     * <p>The name has to go through the registry like any other, or it can collide
+     * with a real member whose raw name was suffixed. Recording it here also makes
+     * every reference to that member resolve to the same name.</p>
+     */
+    public void declareMissingMember(String owner, String name, String desc, boolean isMethod,
+                                     boolean isStatic) {
+        ClassNames names = classes.get(owner);
+        if (names == null) {
+            return;
+        }
+        if (isMethod) {
+            String key = methodKey(name, desc, isStatic);
+            if (!names.methodNames.containsKey(key)) {
+                String base = methodNames.get(key);
+                names.methodNames.put(key, names.uniqueMethod(
+                        base == null ? Names.external(name) : base));
+            }
+        } else {
+            String key = name + ":" + desc;
+            if (!names.field.containsKey(key)) {
+                names.field.put(key, names.uniqueField(name));
+            }
+        }
+    }
+
     /** Assigns the final Java names for every member of {@code cf}. */
     public void register(ClassFile cf) {
         ClassNames names = new ClassNames();

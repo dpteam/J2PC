@@ -20,6 +20,12 @@ public final class Options {
     /** Optional package prefix applied to regenerated classes. */
     public String packagePrefix = "";
 
+    /**
+     * Emit signature-compatible stubs for types the application references but
+     * does not ship, so the output can be compiled and inspected.
+     */
+    public boolean generateStubs = true;
+
     /** When set, only classes whose internal name starts with this prefix are emitted. */
     public String onlyPrefix;
 }

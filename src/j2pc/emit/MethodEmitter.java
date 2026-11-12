@@ -73,6 +73,14 @@ public final class MethodEmitter {
     private boolean staticInitializer;
     /** Pc of a super()/this() call that Java cannot place first, or -1. */
     private int deferredInitPc = -1;
+    /**
+     * Values stored into locals before {@code super(...)}.
+     *
+     * <p>Java forbids a declaration before the mandatory call, so a store in the
+     * prologue is buffered: reads see the expression, and the assignment is emitted
+     * right after {@code super(...)} unless the call itself consumed it.</p>
+     */
+    private final Map<Integer, Val> prologueLocals = new HashMap<>();
     private boolean declarationsInline;
     private boolean prologueMode;
 
@@ -150,6 +158,15 @@ public final class MethodEmitter {
             // constructor, so the mandatory chain is emitted before anything
             // else, including the local declarations.
             prologueMode = true;
+            // The prologue runs at method entry, so the analysis frame of pc 0 is
+            // the right one: without it a parameter whose slot is reused later
+            // would be typed with the merged type and lose its name.
+            currentFrame = analysis.frameAt(0);
+            localNow = new SlotType[analysis.maxLocals];
+            for (int i = 0; i < localNow.length; i++) {
+                localNow[i] = currentFrame != null && i < currentFrame.locals.length
+                        ? currentFrame.locals[i] : SlotType.UNSET_T;
+            }
             java.util.List<String> prologueLines = new ArrayList<>();
             out.captureTo(prologueLines);
             for (Instruction ins : insns) {
@@ -164,6 +181,27 @@ public final class MethodEmitter {
             }
             out.stopCapture();
             prologueMode = false;
+            // Flush the buffered prologue stores: they belong after the mandatory
+            // call, because Java forbids a declaration before it.
+            for (Map.Entry<Integer, Val> e : prologueLocals.entrySet()) {
+                int slot = e.getKey();
+                Val v = e.getValue();
+                SlotType t = storeType(slot, kindOf(v.type), v);
+                String nm = localName(slot, kindOf(t), t);
+                if ("this".equals(nm)) {
+                    continue;
+                }
+                // A parameter is already declared by the signature, and a local that
+                // was declared inline earlier must not be declared twice.
+                buildArgSlots();
+                boolean isParameter = argSlotToIndex.containsKey(slot) && nm.equals(argNameForSlot(slot));
+                if (isParameter || !declared.add(nm)) {
+                    prologueLines.add(nm + " = " + coerce(v, t) + ";");
+                    continue;
+                }
+                prologueLines.add(javaType(t) + " " + nm + " = " + coerce(v, t) + ";");
+            }
+            prologueLocals.clear();
             prologue = reorderSuperFirst(prologueLines);
         }
 
@@ -991,10 +1029,10 @@ public final class MethodEmitter {
                         // A null literal still needs the explicit type when the
                         // target is more specific than Object.
                         return "java.lang.Object".equals(javaType(target))
-                                ? c : "((" + javaType(target) + ")(" + c + "))";
+                                ? c : refCast(javaType(target), target, null, c);
                     }
                     if (!target.desc.equals(v.type.desc)) {
-                        return "((" + javaType(target) + ")(" + c + "))";
+                        return refCast(javaType(target), target, v.type.desc, c);
                     }
                     return c;
                 }
@@ -1002,6 +1040,22 @@ public final class MethodEmitter {
             default:
                 return c;
         }
+    }
+
+    /**
+     * Reference cast, routed through {@code Object} when a stub type is involved.
+     *
+     * <p>javac rejects a cast between unrelated classes, and the real relationship
+     * between two stubbed types is unknown, so the intermediate {@code Object}
+     * makes the cast legal without changing what it does at run time.</p>
+     */
+    private String refCast(String targetType, SlotType target, String actualInternal, String code) {
+        boolean stub = types.isStub(actualInternal)
+                || (target != null && target.desc != null && types.isStub(target.desc));
+        if (stub) {
+            return "((" + targetType + ")(java.lang.Object)(" + code + "))";
+        }
+        return "((" + targetType + ")(" + code + "))";
     }
 
     /** Converts a value to a value of the given JVM descriptor, honouring Z/B/C/S. */
@@ -1659,17 +1713,23 @@ public final class MethodEmitter {
             case O.CHECKCAST: {
                 Val v = pop();
                 String target = cp.className(ins.operand(0));
-                String type = target.startsWith("[") ? types.ref(target)
-                        : types.refInternal(target);
-                push(new Val("((" + type + ")(" + v.code + "))", SlotType.ref(target), null));
+                SlotType targetType = SlotType.ref(target);
+                String type = types.refInternal(target);
+                push(new Val(refCast(type, targetType, v.type.desc, v.code), targetType, null));
                 return false;
             }
             case O.INSTANCEOF: {
                 Val v = pop();
                 String target = cp.className(ins.operand(0));
-                String type = target.startsWith("[") ? types.ref(target)
-                        : types.refInternal(target);
-                push(new Val("(" + v.code + " instanceof " + type + " ? 1 : 0)", SlotType.INT_T, null));
+                String type = types.refInternal(target);
+                // `x instanceof SiblingStub` does not compile when the two stub
+                // types are unrelated, so the operand goes through Object.
+                String operand = types.isStub(target)
+                        || (v.type.desc != null && types.isStub(v.type.desc))
+                        ? "(java.lang.Object)(" + v.code + ")"
+                        : v.code;
+                push(new Val("(" + operand + " instanceof " + type + " ? 1 : 0)",
+                        SlotType.INT_T, null));
                 return false;
             }
             case O.MONITORENTER: {
@@ -1692,6 +1752,14 @@ public final class MethodEmitter {
     // ----------------------------------------------------------- load / store
 
     private boolean loadLocal(int slot, int kind) {
+        // A read of a buffered prologue local yields the expression that was
+        // stored, so `super(...)` receives it directly instead of a variable that
+        // Java would require to be declared before the call.
+        Val buffered = prologueMode ? prologueLocals.get(slot) : null;
+        if (buffered != null) {
+            push(buffered);
+            return false;
+        }
         Val fresh = freshLocals.get(slot);
         if (fresh != null) {
             push(fresh);
@@ -1766,6 +1834,13 @@ public final class MethodEmitter {
 
     private boolean storeLocal(int slot, int kind) {
         Val v = pop();
+        if (prologueMode) {
+            // Buffered as an expression: Java forbids a declaration before the
+            // mandatory super(...)/this(...) call, so the assignment is emitted
+            // after it unless the call consumed the value directly.
+            prologueLocals.put(slot, v);
+            return false;
+        }
         if (v.freshNew != null) {
             // An object created by `new` is stored into a local before its
             // constructor runs (`new`/`dup`/`astore`/.../`aload`/`invokespecial`).
@@ -2428,9 +2503,14 @@ public final class MethodEmitter {
                 if (have.equals(want)) {
                     return recv.code;
                 }
-            } else {
-                return "((" + want + ")(" + recv.code + "))";
             }
+            // A cast between a stub type and anything else cannot be checked by
+            // javac, so it is routed through Object, which always compiles.
+            if (types.isStub(owner)
+                    || (recv.type.desc != null && types.isStub(recv.type.desc))) {
+                return "((" + want + ")(java.lang.Object)(" + recv.code + "))";
+            }
+            return "((" + want + ")(" + recv.code + "))";
         }
         return "((" + want + ")(" + recv.code + "))";
     }

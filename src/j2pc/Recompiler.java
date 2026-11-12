@@ -5,6 +5,7 @@ import j2pc.classfile.ClassReader;
 import j2pc.emit.ClassEmitter;
 import j2pc.emit.NameRegistry;
 import j2pc.emit.Names;
+import j2pc.emit.StubGenerator;
 import j2pc.emit.TypeMapper;
 import j2pc.jar.JadFile;
 import j2pc.jar.JarReader;
@@ -15,9 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Orchestrates a whole JAR recompilation. */
 public final class Recompiler {
@@ -99,6 +102,10 @@ public final class Recompiler {
         // synthetic package and every reference is rewritten.
         TypeMapper types = buildTypeMapper(classes.keySet());
 
+        if (opts.generateStubs) {
+            writeStubs(outRoot, classes, types, registry, result);
+        }
+
         for (ClassFile cf : classes.values()) {
             String internal = cf.name();
             if (opts.onlyPrefix != null && !internal.startsWith(opts.onlyPrefix)) {
@@ -109,7 +116,8 @@ public final class Recompiler {
             Files.createDirectories(dir);
             Path file = dir.resolve(types.simpleName(internal) + ".java");
             try {
-                String src = new ClassEmitter(cf, opts, registry, types, classes).emit();
+                String src = new ClassEmitter(cf, opts, registry, types, classes,
+                        result.memberStubs.get(cf.name())).emit();
                 Files.write(file, src.getBytes(StandardCharsets.UTF_8));
                 Stat st = Stat.of(cf);
                 stats.add(st);
@@ -132,6 +140,76 @@ public final class Recompiler {
         Path manifest = outRoot.resolve("j2pc-report.txt");
         Files.write(manifest, report(jad, classes).getBytes(StandardCharsets.UTF_8));
         return result;
+    }
+
+    /**
+     * Writes signature-compatible stubs for the types the application references
+     * but does not ship.
+     *
+     * <p>The distinction matters: a suite built against a 3D engine it never
+     * packages still translates correctly, and the stubs make that visible instead
+     * of drowning it in "package does not exist".</p>
+     */
+    private void writeStubs(Path outRoot, Map<String, ClassFile> classes, TypeMapper types,
+                            NameRegistry registry, Result result) throws IOException {
+        // The loadability check inside the generator covers the JDK and the
+        // emulation layer, so the known set only needs the application classes.
+        Set<String> known = new HashSet<>(classes.keySet());
+
+        StubGenerator generator = StubGenerator.plan(classes.values(), types, opts, known);
+
+        // A stub for a default-package type faces the same restriction as the
+        // application's own classes: a packaged class cannot reference it. It is
+        // therefore relocated exactly like they are, before any source is written.
+        boolean mixed = isMixed(classes.keySet());
+        for (String internal : generator.stubNames()) {
+            if (mixed && Names.packageName(internal).isEmpty()) {
+                types.rename(internal, TypeMapper.UNPACKAGED + "/" + Names.simpleName(internal));
+            }
+            types.markStub(internal);
+        }
+
+        // Members that a present class does not declare become part of that class.
+        // Their names are allocated through the registry first, so they cannot
+        // collide with a real member and every reference agrees on the spelling.
+        for (Map.Entry<String, StubGenerator.StubType> e : generator.memberStubs().entrySet()) {
+            for (StubGenerator.StubMember m : e.getValue().fieldList()) {
+                registry.declareMissingMember(e.getKey(), m.name, m.desc, false, m.isStatic());
+            }
+            for (StubGenerator.StubMember m : e.getValue().methodList()) {
+                registry.declareMissingMember(e.getKey(), m.name, m.desc, true, m.isStatic());
+            }
+        }
+        result.memberStubs = generator.memberDeclarations(registry);
+
+        Map<String, String> stubs = generator.emitAll();
+        if (stubs.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> e : stubs.entrySet()) {
+            String emittedName = types.internal(e.getKey());
+            String pkg = Names.packageName(emittedName);
+            Path dir = pkg.isEmpty() ? outRoot.resolve("stubs") : outRoot.resolve(pkg.replace('.', '/'));
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(Names.simpleName(emittedName) + ".java"),
+                    e.getValue().getBytes(StandardCharsets.UTF_8));
+            result.stubClasses++;
+        }
+        Log.info("generated %d stub class(es) for missing APIs", stubs.size());
+    }
+
+    /** True when the suite mixes packaged and default-package classes. */
+    private static boolean isMixed(java.util.Collection<String> classNames) {
+        boolean hasPackaged = false;
+        boolean hasDefault = false;
+        for (String name : classNames) {
+            if (Names.packageName(name).isEmpty()) {
+                hasDefault = true;
+            } else {
+                hasPackaged = true;
+            }
+        }
+        return hasPackaged && hasDefault;
     }
 
     private static boolean hasClassMagic(byte[] b) {
@@ -356,6 +434,10 @@ public final class Recompiler {
         public int jarEntryCount;
         /** Classes skipped because the emulation layer already provides them. */
         public int runtimeProvided;
+        /** Stub classes generated for missing APIs. */
+        public int stubClasses;
+        /** Extra member declarations to append to existing classes, by owner. */
+        public Map<String, java.util.List<String>> memberStubs = Map.of();
         public Path launcher;
     }
 

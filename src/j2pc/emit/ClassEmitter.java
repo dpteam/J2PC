@@ -20,14 +20,17 @@ public final class ClassEmitter {
     private final TypeMapper types;
     /** Every class of the application, so supertypes can be inspected. */
     private final Map<String, ClassFile> universe;
+    /** Extra members to append, for classes whose archive record is incomplete. */
+    private final java.util.List<String> extraMembers;
 
     public ClassEmitter(ClassFile cf, Options opts, NameRegistry names, TypeMapper types,
-                        Map<String, ClassFile> universe) {
+                        Map<String, ClassFile> universe, java.util.List<String> extraMembers) {
         this.cf = cf;
         this.opts = opts;
         this.names = names;
         this.types = types;
         this.universe = universe;
+        this.extraMembers = extraMembers == null ? java.util.List.of() : extraMembers;
         this.out = new SourceWriter(opts.indentUnit);
     }
 
@@ -120,6 +123,8 @@ public final class ClassEmitter {
             emitMissingAbstractStubs();
         }
 
+        emitExtraMembers();
+
         if (!any) {
             out.line("// no members");
         }
@@ -127,6 +132,18 @@ public final class ClassEmitter {
         out.outdent();
         out.line("}");
         return out.toString();
+    }
+
+    /** Appends the members that the archive record of this class is missing. */
+    private void emitExtraMembers() {
+        if (extraMembers.isEmpty()) {
+            return;
+        }
+        out.blank();
+        out.line("// Members referenced elsewhere but absent from the original archive.");
+        for (String line : extraMembers) {
+            out.line(line);
+        }
     }
 
     private boolean hasAbstractMethod() {

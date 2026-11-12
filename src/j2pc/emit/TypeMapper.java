@@ -3,7 +3,9 @@ package j2pc.emit;
 import j2pc.classfile.Descriptor;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Maps internal class names to the names used in the generated source.
@@ -20,10 +22,29 @@ public final class TypeMapper {
     public static final String UNPACKAGED = "unpackaged";
 
     private final Map<String, String> renamed = new HashMap<>();
+    private final Set<String> stubs = new HashSet<>();
 
     /** Registers that {@code from} is emitted as {@code to} (both internal names). */
     public void rename(String from, String to) {
         renamed.put(from, to);
+    }
+
+    /** Records a type that exists only as a generated stub. */
+    public void markStub(String internalName) {
+        stubs.add(internalName);
+    }
+
+    /**
+     * True when the type is a generated stub.
+     *
+     * <p>The real relationship between two stubbed types is unknown — an m3g
+     * {@code TriangleStripArray} is an {@code IndexBuffer}, but nothing in the
+     * archive says so — and Java rejects a cast between unrelated classes. Casts
+     * that involve a stub therefore go through {@code Object}, which always
+     * compiles.</p>
+     */
+    public boolean isStub(String internalName) {
+        return stubs.contains(internalName);
     }
 
     public boolean isEmpty() {
