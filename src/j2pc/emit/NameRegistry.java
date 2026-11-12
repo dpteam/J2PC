@@ -133,8 +133,15 @@ public final class NameRegistry {
             }
             names.field.put(f.name() + ":" + f.desc(), names.uniqueField(f.name()));
         }
-        // Assign the declared methods in a stable order, so that a residual clash
-        // is resolved the same way no matter which class is emitted first.
+
+        // A method that overrides or implements an inherited one must keep the
+        // inherited name, otherwise javac reports "does not override". Names are
+        // therefore reserved for the whole inherited set first, and only genuinely
+        // new signatures are disambiguated.
+        Map<String, String> inheritedMethods = inheritedMethodNames(cf);
+        for (String name : inheritedMethods.values()) {
+            names.usedMethods.add(name);
+        }
         java.util.List<String> keys = new java.util.ArrayList<>();
         for (ClassFile.Member m : cf.methods) {
             if (m.name() != null && m.desc() != null) {
@@ -143,13 +150,48 @@ public final class NameRegistry {
         }
         java.util.Collections.sort(keys);
         for (String key : keys) {
+            if (names.methodNames.containsKey(key)) {
+                continue;
+            }
+            String inheritedName = inheritedMethods.get(key);
+            if (inheritedName != null) {
+                names.methodNames.put(key, inheritedName);
+                continue;
+            }
             String base = methodNames.get(key);
-            if (base != null && !names.methodNames.containsKey(key)) {
+            if (base != null) {
                 names.methodNames.put(key, names.uniqueMethod(base));
             }
         }
         classes.put(cf.name(), names);
         typeNames.add(Names.simpleName(cf.name()));
+    }
+
+    /** Method names visible through the superclass and interface chain. */
+    private Map<String, String> inheritedMethodNames(ClassFile cf) {
+        Map<String, String> out = new HashMap<>();
+        collectInherited(cf.superName(), out, 0);
+        for (String itf : cf.interfaceNames()) {
+            collectInherited(itf, out, 0);
+        }
+        return out;
+    }
+
+    private void collectInherited(String internal, Map<String, String> out, int depth) {
+        if (internal == null || depth > 32) {
+            return;
+        }
+        ClassNames names = classes.get(internal);
+        if (names == null) {
+            return;
+        }
+        for (Map.Entry<String, String> e : names.methodNames.entrySet()) {
+            out.putIfAbsent(e.getKey(), e.getValue());
+        }
+        String parent = superOf.get(internal);
+        if (parent != null) {
+            collectInherited(parent, out, depth + 1);
+        }
     }
 
     /**
@@ -167,20 +209,31 @@ public final class NameRegistry {
         if (owner == null || !classes.containsKey(owner)) {
             return Names.external(name);
         }
-        boolean isStatic = isStaticMethod(owner, name, desc);
-        String key = methodKey(name, desc, isStatic);
-        String base = methodNames.get(key);
-        if (base == null) {
-            return Names.external(name);
+        // Staticness is part of the key, and the call site may name a subclass
+        // while the method is declared further up. Both variants are tried before
+        // giving up, so an inherited static method keeps its name.
+        String[] keys = {
+                methodKey(name, desc, isStaticMethod(owner, name, desc)),
+                methodKey(name, desc, true),
+                methodKey(name, desc, false),
+        };
+        for (String key : keys) {
+            String found = lookupInHierarchy(owner, key);
+            if (found != null) {
+                return found;
+            }
         }
-        // Walk up until the declaring class is found, so an inherited method keeps
-        // the name its owner gave it.
+        return Names.external(name);
+    }
+
+    /** Finds the assigned name of {@code key} in {@code owner} or its ancestors. */
+    private String lookupInHierarchy(String owner, String key) {
         String current = owner;
         int guard = 0;
         while (current != null && guard++ < 64) {
             ClassNames names = classes.get(current);
             if (names == null) {
-                break;
+                return null;
             }
             String resolved = names.methodNames.get(key);
             if (resolved != null) {
@@ -188,13 +241,7 @@ public final class NameRegistry {
             }
             current = superOf.get(current);
         }
-        ClassNames names = classes.get(owner);
-        if (names == null) {
-            return base;
-        }
-        String resolved = names.uniqueMethod(base);
-        names.methodNames.put(key, resolved);
-        return resolved;
+        return null;
     }
 
     /** Field names already used anywhere in the superclass chain. */

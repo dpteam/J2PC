@@ -61,6 +61,16 @@ public class LocalDevice {
         return null;
     }
 
+    /**
+     * Vendor variant that resolves a service record from an open connection.
+     *
+     * <p>Not part of JSR-82, but several handset implementations expose it and
+     * games call it directly.</p>
+     */
+    public ServiceRecord getRecord(javax.microedition.io.Connection conn) {
+        return null;
+    }
+
     public boolean setDiscoverable(int mode) throws BluetoothStateException {
         throw new BluetoothStateException("bluetooth is not available on this device");
     }

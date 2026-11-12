@@ -14,6 +14,15 @@ public final class FileSystemRegistry {
         boolean rootRemoved(String root);
     }
 
+    /** The listener type MIDP actually declares. */
+    public static boolean addFileSystemListener(FileSystemListener listener) {
+        return true;
+    }
+
+    public static boolean removeFileSystemListener(FileSystemListener listener) {
+        return true;
+    }
+
     private static final Vector<String> ROOTS = new Vector<>();
 
     static {

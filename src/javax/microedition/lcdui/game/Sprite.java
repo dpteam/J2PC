@@ -15,7 +15,7 @@ public class Sprite extends Layer {
     public static final int TRANS_MIRROR_ROT180 = 1;
     public static final int TRANS_MIRROR_ROT270 = 4;
 
-    private final Image source;
+    private Image source;
     private final int frameWidth;
     private final int frameHeight;
     private int frame;
@@ -76,6 +76,22 @@ public class Sprite extends Layer {
 
     public void setFrame(int sequenceIndex) {
         this.frame = sequenceIndex;
+    }
+
+    /**
+     * Replaces the image and the frame grid.
+     *
+     * <p>Part of the MIDP 2.0 API; used to swap sprite sheets at run time.</p>
+     */
+    public void setImage(Image img, int frameWidth, int frameHeight) {
+        if (img == null || frameWidth <= 0 || frameHeight <= 0
+                || img.getWidth() % frameWidth != 0 || img.getHeight() % frameHeight != 0) {
+            throw new IllegalArgumentException("bad frame size");
+        }
+        this.source = img;
+        this.width = frameWidth;
+        this.height = frameHeight;
+        this.frame = 0;
     }
 
     public int getRawFrameCount() {

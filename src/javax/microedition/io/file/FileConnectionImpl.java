@@ -42,6 +42,11 @@ public final class FileConnectionImpl implements FileConnection {
     }
 
     @Override
+    public boolean exists() {
+        return Files.exists(path);
+    }
+
+    @Override
     public InputStream openInputStream() throws IOException {
         checkOpen();
         return Files.newInputStream(path);

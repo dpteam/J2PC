@@ -10,6 +10,7 @@ import j2pc.bytecode.O;
 import j2pc.classfile.ClassFile;
 import j2pc.classfile.ConstantPool;
 import j2pc.classfile.Descriptor;
+import j2pc.util.Log;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -70,6 +71,8 @@ public final class MethodEmitter {
     private boolean slotZeroStored;
     /** Set for {@code <clinit>}: {@code return} leaves a labelled block, not a method. */
     private boolean staticInitializer;
+    /** Pc of a super()/this() call that Java cannot place first, or -1. */
+    private int deferredInitPc = -1;
     private boolean declarationsInline;
     private boolean prologueMode;
 
@@ -129,6 +132,17 @@ public final class MethodEmitter {
         int initPc = "<init>".equals(method.name()) ? findConstructorCall() : -1;
         int loopStart = 0;
         String prologue = "";
+        if (initPc >= 0 && !inStraightLinePrefix(initPc)) {
+            // The mandatory call sits behind a branch, which Java cannot express:
+            // super(...)/this(...) must be the first statement. The constructor is
+            // still emitted, with an implicit super() and the deferred call
+            // replaced by a stub, so the class compiles and the problem is visible
+            // instead of silent.
+            Log.warn("%s%s: super()/this() is not the first statement; delegation dropped",
+                    cf.name(), method.desc());
+            deferredInitPc = initPc;
+            initPc = -1;
+        }
         if (initPc >= 0) {
             int after = nextPcOf(initPc);
             loopStart = after < 0 ? initPc : after;
@@ -523,18 +537,50 @@ public final class MethodEmitter {
 
     /**
      * Finds the {@code super(...)}/{@code this(...)} call of a constructor.
-     * Returns -1 when the constructor has no explicit call (Java inserts one).
+     *
+     * <p>It is not simply the first {@code invokespecial <init>}: a constructor
+     * may allocate and initialise an object before calling {@code super()}. The
+     * mandatory call is the one whose owner is the superclass or the class
+     * itself.</p>
+     *
+     * <p>Returns -1 when the constructor has no explicit call, in which case javac
+     * inserts one.</p>
      */
     private int findConstructorCall() {
         for (Instruction ins : insns) {
-            if (ins.op == O.INVOKESPECIAL && "<init>".equals(cp.refName(ins.operand(0)))) {
-                return ins.pc;
+            if (ins.op != O.INVOKESPECIAL) {
+                continue;
             }
-            if (ins.isBranch() || ins.op == O.ATHROW || ins.isReturn()) {
-                return -1;
+            int idx = ins.operand(0);
+            if (!"<init>".equals(cp.refName(idx))) {
+                continue;
+            }
+            String owner = cp.refOwner(idx);
+            if (owner != null && (owner.equals(cf.superName()) || owner.equals(cf.name()))) {
+                return ins.pc;
             }
         }
         return -1;
+    }
+
+    /**
+     * True when no branch precedes {@code pc}.
+     *
+     * <p>Java requires {@code super(...)}/{@code this(...)} to be the first
+     * statement, so the prologue can only be lifted out of the dispatch loop when
+     * the call sits in the straight-line prefix. A delegating constructor that
+     * picks its arguments with a conditional breaks that assumption.</p>
+     */
+    private boolean inStraightLinePrefix(int pc) {
+        for (Instruction ins : insns) {
+            if (ins.pc >= pc) {
+                return true;
+            }
+            if (ins.isBranch() || ins.isUnconditionalTransfer()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private int nextPcOf(int pc) {
@@ -1521,6 +1567,21 @@ public final class MethodEmitter {
 
             case O.INVOKEVIRTUAL: case O.INVOKESPECIAL:
             case O.INVOKESTATIC: case O.INVOKEINTERFACE:
+                if (ins.pc == deferredInitPc) {
+                    // Java cannot express a super()/this() call that is not the
+                    // first statement, so the call is replaced by a stub that
+                    // makes the gap explicit at run time.
+                    for (int i = 0; i < Descriptor.args(cp.refType(ins.operand(0))).length; i++) {
+                        pop();
+                    }
+                    pop();
+                    out.line("// J2PC: the original constructor delegates here, after evaluating");
+                    out.line("// arguments with branches. Java requires that call to be first, so");
+                    out.line("// the delegation could not be reproduced.");
+                    out.line("throw new UnsupportedOperationException("
+                            + "\"constructor delegation cannot be expressed in Java\");");
+                    return true;
+                }
                 return emitInvoke(ins);
 
             case O.NEW: {

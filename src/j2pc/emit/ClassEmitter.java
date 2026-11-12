@@ -3,6 +3,7 @@ package j2pc.emit;
 import j2pc.Options;
 import j2pc.classfile.ClassFile;
 import j2pc.classfile.Descriptor;
+import j2pc.util.Log;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -162,6 +163,8 @@ public final class ClassEmitter {
         if (missing.isEmpty()) {
             return;
         }
+        Log.debug("%s: %d abstract method(s) not implemented: %s",
+                cf.name(), missing.size(), missing.keySet());
         java.util.Set<String> usedNames = new java.util.HashSet<>();
         for (Map.Entry<String, ClassFile.Member> e : missing.entrySet()) {
             ClassFile.Member m = e.getValue();

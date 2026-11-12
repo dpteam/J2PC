@@ -123,17 +123,24 @@ Some things that look like limitations are deliberate:
 
 ## Corpus reality check
 
-On a private collection of 151 applications, all 151 recompile and 76 produce Java that
-compiles (1 272 classes, 45 800 methods). The rest fail on **missing APIs** or on suites that
+On a private collection of 151 applications, all 151 recompile and 93 produce Java that
+compiles (1 625 classes, 60 883 methods). The rest fail on **missing APIs** or on suites that
 ship only part of their classes:
 
 | Missing / broken | Applications |
 |------------------|--------------|
 | `javax.microedition.m3g` (3D engine) | 12 |
-| `com.mascotcapsule.micro3d.v3` (3D engine) | ~8 |
-| `javax.microedition.sensor` | ~3 |
-| `javax.wireless.messaging` | ~3 |
+| `com.mascotcapsule.micro3d.v3` (3D engine) | ~6 |
 | incomplete JARs (classes referenced but not shipped) | remainder |
 | vendor extensions (`com.siemens`, `com.motorola`, …) | remainder |
 
 Implementing a 3D engine is a separate project; the 2D platform is what this tool targets.
+
+### Two structural limits
+
+* **`code too large`.** A recompiled method can exceed the 64 KB bytecode limit, because the
+  dispatch loop keeps every original block plus the spilling code. Only a handful of
+  hand-written giants hit this; splitting a method into helper blocks is the fix.
+* **Deferred `super(...)`.** Java requires the call to be first, but bytecode may compute its
+  arguments with branches. Such a constructor is emitted with an implicit `super()` and the
+  delegation replaced by a stub; a warning names the method.
