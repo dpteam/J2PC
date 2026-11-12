@@ -212,7 +212,7 @@ public final class ClassEmitter {
         }
 
         out.blank();
-        String code = MethodEmitter.emit(cf, clinit, opts, names, types);
+        String code = MethodEmitter.emitStaticInitializer(cf, clinit, opts, names, types);
         int open = code.indexOf('{');
         int close = code.lastIndexOf('}');
         out.line("static {");
@@ -221,19 +221,17 @@ public final class ClassEmitter {
             List<String> lines = new ArrayList<>();
             for (String line : body.split("\n")) {
                 String trimmed = line.trim();
-                // A bare `return;` has no meaning in an initialiser block.
-                if (trimmed.isEmpty() || trimmed.equals("return;")) {
+                if (trimmed.isEmpty()) {
                     continue;
                 }
                 lines.add(trimmed);
             }
             // A static initialiser must be able to complete normally (JLS 8.7).
-            // A recompiled dispatch loop ends in `while (true)` with no break, so
-            // javac considers the initialiser unable to finish and rejects the
-            // class. Wrapping the body in `if (true)` keeps the behaviour and
-            // satisfies the rule, which special-cases that form.
-            boolean cannotComplete = lines.stream().anyMatch(l -> l.contains("while (true)"))
-                    && lines.stream().noneMatch(l -> l.startsWith("break"));
+            // When the body always throws, javac rejects the class; wrapping it in
+            // `if (true)` keeps the behaviour and satisfies the rule.
+            boolean cannotComplete = !lines.isEmpty()
+                    && lines.get(lines.size() - 1).startsWith("throw ")
+                    && !lines.stream().anyMatch(l -> l.startsWith("break"));
             if (cannotComplete) {
                 out.line("if (true) {");
                 out.indent();

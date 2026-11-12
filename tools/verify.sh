@@ -37,14 +37,24 @@ find "$WORK/out" -name '*.java' > "$WORK/gen.txt"
 javac -encoding UTF-8 -nowarn -cp "$JAR" -d "$WORK/gen" @"$WORK/gen.txt"
 
 echo "[4/5] Running the verifier against both versions..."
-java -cp "$JAR:$WORK/original" j2pc.tools.Verifier --classes="$CLASSES" \
+java -cp "$WORK/original:$JAR" j2pc.tools.Verifier --classes="$CLASSES" \
     > "$WORK/original.txt" 2>&1 || true
-java -cp "$JAR:$WORK/gen" j2pc.tools.Verifier --classes="$CLASSES" \
+java -cp "$WORK/gen:$JAR" j2pc.tools.Verifier --classes="$CLASSES" \
     > "$WORK/recompiled.txt" 2>&1 || true
 
 echo "[5/5] Comparing..."
 if grep -q "Could not find or load main class" "$WORK/original.txt"; then
     echo "VERIFIER DID NOT RUN - see $WORK/original.txt"
+    exit 1
+fi
+# A comparison of two empty outputs would trivially "pass".
+results=$(grep -c '  .* = ' "$WORK/original.txt" || true)
+if [ "${results:-0}" -lt 60 ]; then
+    echo "TOO FEW RESULTS ($results) - the verifier did not exercise the suite"
+    exit 1
+fi
+if grep -qE '<not loadable|<cannot instantiate' "$WORK/original.txt"; then
+    echo "SOME CLASSES WERE NOT LOADABLE - see $WORK/original.txt"
     exit 1
 fi
 if diff -u "$WORK/original.txt" "$WORK/recompiled.txt" > "$WORK/diff.txt"; then

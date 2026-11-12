@@ -106,8 +106,32 @@ public final class Arithmetic {
         return -v + (+v);
     }
 
-    /** Increment in its wide form, so the decoder meets the {@code wide} prefix. */
-    public int wideIncrement(int seed) {
+    /**
+     * Negative constants in the whole {@code bipush} range.
+     *
+     * <p>{@code bipush} carries a <em>signed</em> byte operand, so {@code -1} and
+     * {@code -128} are legal values. Reading the operand as unsigned silently
+     * turns {@code -3} into {@code 253}, which is invisible until a comparison or
+     * a return value is checked.</p>
+     */
+    public int negativeConstants() {
+        int a = -1;
+        int b = -2;
+        int c = -3;
+        int d = -64;
+        int e = -127;
+        int f = -128;
+        int g = 127;
+        int h = 128;
+        return a + b + c + d + e + f + g + h;
+    }
+
+    /** The same values as comparisons, so a wrong sign cannot cancel out. */
+    public boolean negativeConstantsCompare() {
+        return -1 < 0 && -128 < -127 && 127 > 0 && -3 != 253;
+    }
+
+    /** Increment in its wide form, so the decoder meets the {@code wide} prefix. */    public int wideIncrement(int seed) {
         int a = seed;
         int b = a + 1;
         int c = b + 1;

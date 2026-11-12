@@ -64,6 +64,11 @@ public final class Decoder {
             pc++;
             switch (op) {
                 case O.BIPUSH:
+                    // The operand is a *signed* byte: -1 .. -128 are legal.
+                    out.add(new Instruction(start, op, new int[]{(byte) code[pc]}));
+                    pc += 1;
+                    break;
+
                 case O.LDC:
                 case O.ILOAD:
                 case O.LLOAD:

@@ -68,6 +68,8 @@ public final class MethodEmitter {
     private boolean prologueNeedsThrows;
     private boolean thisIsSlotZero;
     private boolean slotZeroStored;
+    /** Set for {@code <clinit>}: {@code return} leaves a labelled block, not a method. */
+    private boolean staticInitializer;
     private boolean declarationsInline;
     private boolean prologueMode;
 
@@ -89,6 +91,14 @@ public final class MethodEmitter {
     public static String emit(ClassFile cf, ClassFile.Member method, Options opts,
                                      NameRegistry names, TypeMapper types) {
         return new MethodEmitter(cf, method, opts, names, types).run();
+    }
+
+    /** Emits a {@code <clinit>} body, where {@code return} has to leave a block. */
+    public static String emitStaticInitializer(ClassFile cf, ClassFile.Member clinit, Options opts,
+                                               NameRegistry names, TypeMapper types) {
+        MethodEmitter emitter = new MethodEmitter(cf, clinit, opts, names, types);
+        emitter.staticInitializer = true;
+        return emitter.run();
     }
 
     // ------------------------------------------------------------------ entry
@@ -468,7 +478,7 @@ public final class MethodEmitter {
         starts.add(loopStart);
         int[] leaders = starts.stream().mapToInt(Integer::intValue).toArray();
 
-        out.line("while (true) {");
+        out.line((staticInitializer ? "__clinit: " : "") + "while (true) {");
         out.indent();
         out.line("switch (" + PC + ") {");
         out.indent();
@@ -573,9 +583,12 @@ public final class MethodEmitter {
             }
         }
 
-        int handlerIndex = wrapping.size() - 1;
+        // The handlers were opened from the last to the first, so the first one
+        // in the table is the innermost `try`. Closing therefore has to run in
+        // table order: pairing the other way round would attach each catch to the
+        // wrong try and change which exception is caught first.
         for (int i = 0; i < opened; i++) {
-            ClassFile.Handler h = wrapping.get(handlerIndex - i);
+            ClassFile.Handler h = wrapping.get(i);
             out.outdent();
             String exType = h.catchType == 0 ? "java.lang.Throwable"
                     : types.refInternal(cp.className(h.catchType));
@@ -696,6 +709,34 @@ public final class MethodEmitter {
      * about to be duplicated: {@code dup} of {@code new int[5]} must not emit
      * {@code new int[5][0] = ...}.
      */
+    /**
+     * Evaluates pending stack values that mention {@code token} before a store
+     * changes it.
+     *
+     * <p>{@code counter++} compiles to {@code getfield}, {@code dup_x1},
+     * {@code iadd}, {@code putfield}: the old value stays on the stack as the
+     * <em>expression</em> {@code this.counter}, and after the store that
+     * expression would read the new value. Copying it into a temporary first is
+     * what keeps the post-increment semantics.</p>
+     */
+    private void preservePending(String token) {
+        if (token == null || token.isEmpty()) {
+            return;
+        }
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(?<![\\w$])" + java.util.regex.Pattern.quote(token) + "(?![\\w$])");
+        for (int i = 0; i < stack.size(); i++) {
+            Val v = stack.get(i);
+            if (v.code == null || !p.matcher(v.code).find()) {
+                continue;
+            }
+            String nm = "__p" + (tempSeq++);
+            declare(nm, javaType(v.type), v.type.defaultLiteral());
+            out.line(nm + " = " + v.code + ";");
+            stack.set(i, new Val(nm, v.type, v.sem, null));
+        }
+    }
+
     private Val materialize(Val v) {
         if (isSimple(v.code)) {
             return v;
@@ -1370,7 +1411,17 @@ public final class MethodEmitter {
                 return true;
             }
             case O.RETURN:
-                out.line("return;");
+                if (staticInitializer) {
+                    // Inside <clinit> the body lives in a dispatch loop, so the
+                    // JVM `return` becomes a break out of that loop. A flat body
+                    // needs nothing at all.
+                    if (!flat) {
+                        spill();
+                        out.line("break __clinit;");
+                    }
+                } else {
+                    out.line("return;");
+                }
                 return true;
 
             case O.INVOKEDYNAMIC:
@@ -1392,8 +1443,10 @@ public final class MethodEmitter {
                 int idx = ins.operand(0);
                 String owner = cp.refOwner(idx);
                 String desc = cp.refType(idx);
+                String fname = names.field(owner, cp.refName(idx), cp.refType(idx));
                 Val v = pop();
-                out.line(types.refInternal(owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx)) + " = "
+                preservePending(fname);
+                out.line(types.refInternal(owner) + "." + fname + " = "
                         + coerceTo(v.code, v.type, desc) + ";");
                 return false;
             }
@@ -1414,9 +1467,11 @@ public final class MethodEmitter {
                 int idx = ins.operand(0);
                 String owner = cp.refOwner(idx);
                 String desc = cp.refType(idx);
+                String fname = names.field(owner, cp.refName(idx), cp.refType(idx));
                 Val v = pop();
                 Val recv = pop();
-                out.line(cast(recv, owner) + "." + names.field(owner, cp.refName(idx), cp.refType(idx)) + " = "
+                preservePending(fname);
+                out.line(cast(recv, owner) + "." + fname + " = "
                         + coerceTo(v.code, v.type, desc) + ";");
                 return false;
             }
